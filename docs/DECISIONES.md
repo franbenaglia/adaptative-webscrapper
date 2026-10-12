@@ -75,6 +75,53 @@ Formato: `D-NNN — título`, fecha, estado (propuesta / aceptada / sustituida),
 - Consecuencias: binarios estáticos y Dockerfile sin toolchain de C. Las migraciones viven en `migrations/`
   como paquete Go con `embed`, para que el binario las lleve dentro.
 
+### D-010 — `JobService` es el caso de uso compartido; `ScrapingService` queda como motor
+
+- Fecha: 2026-10-12. Estado: aceptada. Amplía D-007.
+- Contexto: con persistencia, tanto la CLI como la API necesitan crear un trabajo, ejecutarlo y dejar
+  historial. La validación debe existir en un solo sitio.
+- Decisión: `application.JobService` (`Create`, `Execute`, `Cancel`, `Reject`, `RecoverInterrupted`, lecturas)
+  es lo que invocan `internal/cli` e `internal/api`. `ScrapingService.Run` recibe ahora un `ProgressSink`
+  por ejecución y solo lo llama `JobService`. `internal/bootstrap` es la única raíz de composición y la usan
+  `cmd/server` y `cmd/scraper`.
+- Consecuencias: la CLI ejecuta el trabajo en su propio proceso pero escribe en la misma base SQLite que el
+  servidor, así que su historial aparece en la API. Un trabajo en curso solo puede cancelarse desde el
+  proceso que lo ejecuta. El futuro modo `--server` de la CLI será otro cliente de la misma API.
+
+### D-011 — Cada trabajo guarda una copia de su receta
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: `jobs.recipe` contiene la receta usada (JSON) y `jobs.recipe_id` no es clave foránea.
+- Consecuencias: se pueden ejecutar recetas en línea sin guardarlas, y borrar o editar una receta no altera
+  el historial ni la exportación de trabajos anteriores.
+
+### D-012 — Guardado incremental y eventos
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: el motor emite los registros nuevos de cada página en el evento `records.extracted`;
+  `JobService` los guarda en ese momento, actualiza los contadores del trabajo y registra un `job_event`
+  con `seq` creciente. El estado final se guarda con un contexto no cancelable.
+- Consecuencias: un fallo o cancelación tardíos conservan lo extraído. SSE usa `seq` como `id`, de modo que
+  `Last-Event-ID` reanuda sin duplicados; primero se suscribe al `EventHub` y después lee el historial.
+  Un suscriptor lento se descarta y debe reconectar.
+
+### D-013 — Protección mínima de la API local
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Contexto: la API no tiene autenticación y se pensó para uso local.
+- Decisión: escucha por defecto en `127.0.0.1:8080`; todo `POST` exige `Content-Type: application/json`
+  (impide CSRF desde formularios de otras webs); no se envían cabeceras CORS; cuerpos limitados a 1 MB y
+  decodificación estricta.
+- Consecuencias: el frontend de la Fase 3 debe servirse desde el mismo origen (o con proxy de Vite en
+  desarrollo). Falta validar la cabecera `Host` contra DNS rebinding: pendiente para la Fase 5.
+
+### D-014 — Añadidos no pedidos en la especificación
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: comando `recipes import <archivo>` (sin él la CLI no podía guardar recetas), flag `--recipe-id`
+  en `scrape`, variable `APP_JOB_TIMEOUT` (duración máxima de un trabajo, 10 min por defecto) y evento
+  `job.cancelled`.
+
 ## Propuestas pendientes de confirmar (aún no son decisiones)
 
 Surgen de la evaluación de factibilidad del 2026-10-12. Conviértelas en entradas `D-NNN` al adoptarlas.

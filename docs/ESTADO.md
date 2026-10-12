@@ -4,51 +4,56 @@
 
 ## Resumen
 
-Fase 1 terminada y verificada: la CLI ejecuta una receta manual con Playwright sobre el sitio de
-demostración local, recorre la paginación, aplica límites y exporta JSON y CSV. No hay todavía
-persistencia, servidor HTTP, interfaz web ni IA.
+Fases 1 y 2 terminadas y verificadas. Hay motor determinista con Playwright, CLI, persistencia SQLite,
+cola de trabajos y API HTTP con SSE. No hay todavía interfaz web ni IA.
 
 ## Fase actual
 
-**Fase 2 — Persistencia y servidor**, en curso.
+**Fase 3 — Interfaz web**, sin empezar.
 
 ## Hecho
 
 - Fase 0: especificación evaluada, documentación de continuidad, Go 1.27.2 instalado, git inicializado.
-- Fase 1 (2026-10-12), verificada con `make check`, `make test-browser` y una ejecución real de la CLI
-  contra `cmd/demosite` (6 registros en 2 páginas; código de salida 5 con receta inválida):
-  - `internal/domain`: receta declarativa y su validación, solicitud, conversión de valores.
-  - `internal/application`: `ScrapingService` y puertos `BrowserLauncher`, `BrowserSession`, `ProgressSink`.
-  - `internal/browser`: adaptador Playwright (único paquete que importa `playwright-go`).
-  - `internal/export`: JSON y CSV.
-  - `internal/cli` y `cmd/scraper`: comandos `scrape` y `version`, códigos de salida.
-  - `cmd/demosite`, `examples/demo`, `examples/recipes/productos-demo.json`, `Makefile`, `README.md`.
+- Fase 1 (2026-10-12): dominio, motor, adaptador Playwright, exportadores, CLI, sitio de demostración.
+- Fase 2 (2026-10-12), verificada con `make check` (incluye `-race`), `make test-browser` y una ejecución
+  real: servidor + sitio de demostración, receta creada por API, trabajo lanzado con
+  `POST /recipes/{id}/run`, seis eventos por SSE, exportación CSV y el mismo historial visto desde la CLI.
+  - `internal/domain/job.go`: estados, transiciones, `Job`, `JobEvent`.
+  - `migrations/` e `internal/storage/sqlite`: esquema y repositorios.
+  - `internal/application`: `JobService`, `RecipeService`, `EventHub`, `Queue`.
+  - `internal/api`: API `/api/v1` con SSE; `cmd/server`.
+  - `internal/config`, `internal/bootstrap`, `.env.example`.
+  - CLI: `recipes list|show|import|run`, `jobs list|show`, `scrape --recipe-id`.
 
 ## En curso
 
-- Fase 2, en tres commits: (a) estados de trabajo + SQLite y migraciones; (b) `JobService`, cola y CLI
-  sobre la base de datos; (c) API HTTP con SSE y `cmd/server`. Mira `git log` para saber cuáles están hechos
-  y `make check` para ver si lo que hay sin commit compila.
+Nada.
 
 ## Siguiente paso
 
-Empezar la Fase 2 por este orden:
+Empezar la Fase 3 por este orden:
 
-1. Decidir el driver SQLite (P-2 en `docs/DECISIONES.md`) y crear `migrations/` con `recipes`,
-   `recipe_versions`, `jobs`, `job_events`, `records`.
-2. Estados de trabajo con transiciones explícitas en `internal/domain` (`queued`, `running`, `completed`,
-   `failed`, `blocked`, `cancelled`) y sus pruebas.
-3. Repositorios SQLite detrás de puertos; añadir `RecipeID` y `JobID` a los tipos (D-006).
-4. Cola en proceso con concurrencia configurable, persistencia incremental de registros y recuperación de panics.
-5. API HTTP `/api/v1` con handlers delgados, SSE en `/jobs/{id}/events` y endpoint de salud.
-6. Comandos `recipes` y `jobs` de la CLI.
+1. Crear `web/` con Vite + React + TypeScript (`npm create vite@latest web -- --template react-ts`) y un
+   proxy de desarrollo de `/api` hacia `127.0.0.1:8080` (ver D-013: sin CORS).
+2. Cliente tipado de la API (`internal/api` es la referencia; las formas JSON salen de las etiquetas de
+   `internal/domain`).
+3. Pantalla principal: URL, límites, headless, receta como JSON validado (la instrucción en lenguaje
+   natural llega en la Fase 4), inicio del trabajo, progreso con `EventSource` sobre
+   `/api/v1/jobs/{id}/events`, vista previa tabular, avisos y errores, botones de exportación.
+4. Vistas de historial de trabajos y de recetas (guardar, editar, ejecutar, borrar).
+5. Servir `web/dist` desde `cmd/server` (mismo origen) y añadir los comandos al `Makefile`.
 
 ## Pendientes conocidos
 
-- Sin protección SSRF (Fase 5): no exponer el servicio a URL no confiables todavía (D-008).
-- Sin detección de login, CAPTCHA o bloqueo: `domain.ErrBlocked` y su código de salida existen, pero nada lo emite aún.
+- Sin protección SSRF ni validación de `Host` (Fase 5): no exponer el servicio fuera de loopback ni
+  ejecutar recetas de origen no confiable (D-008, D-013).
+- Sin detección de login, CAPTCHA o bloqueo: `domain.ErrBlocked`, el estado `blocked` y el código de salida
+  existen, pero nada los emite aún.
 - `number` es el único tipo numérico; faltan fechas y moneda (D-006).
-- La comparación con ejecuciones anteriores requiere la persistencia de la Fase 2.
+- Falta comparar resultados con ejecuciones anteriores ("cambios anormales"); los datos ya se guardan.
+- Sin capturas ni trazas de Playwright al fallar, ni política de retención (Fase 5).
+- La CLI no tiene modo `--server`; un trabajo en curso solo se cancela desde el proceso que lo ejecuta (D-010).
+- No hay endpoint para consultar versiones anteriores de una receta (se guardan en `recipe_versions`).
 
 ## Entorno de desarrollo (comprobado el 2026-10-12)
 
@@ -67,7 +72,7 @@ Empezar la Fase 2 por este orden:
 ## Fases (de la especificación)
 
 - [x] Fase 1 — Base funcional: módulo Go, dominio, interfaces, CLI mínima, extracción determinista con receta manual, export JSON/CSV, pruebas.
-- [ ] Fase 2 — Persistencia y servidor: SQLite, migraciones, API HTTP, cola, cancelación, SSE, historial.
+- [x] Fase 2 — Persistencia y servidor: SQLite, migraciones, API HTTP, cola, cancelación, SSE, historial.
 - [ ] Fase 3 — Interfaz web: formulario, progreso, vista previa, historial, recetas, exportaciones.
 - [ ] Fase 4 — IA adaptable: adaptador Ollama, snapshots, descubrimiento, validación, reparación, versiones.
 - [ ] Fase 5 — Empaquetado y endurecimiento: Docker, SSRF completo, timeouts, trazas, documentación.

@@ -1,14 +1,15 @@
-.PHONY: build test test-browser fmt vet check install-browsers demo-site demo
+.PHONY: build test test-browser fmt vet check install-browsers demo-site demo server
 
 VERSION ?= dev
 
 build:
 	go build -ldflags "-X main.version=$(VERSION)" -o bin/adaptive-scraper ./cmd/scraper
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/adaptive-scraper-server ./cmd/server
 	go build -o bin/demosite ./cmd/demosite
 
 # Pruebas rápidas: sin navegador, sin Internet.
 test:
-	go test ./...
+	go test -race ./...
 
 # Pruebas de integración con Chromium real contra un servidor local.
 test-browser:
@@ -30,6 +31,10 @@ install-browsers:
 
 demo-site:
 	go run ./cmd/demosite
+
+# API HTTP en APP_HTTP_ADDR (por defecto 127.0.0.1:8080).
+server:
+	go run ./cmd/server
 
 # Requiere `make demo-site` en otra terminal.
 demo: build

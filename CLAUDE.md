@@ -27,7 +27,9 @@ El objetivo es que cualquier agente pueda retomar el trabajo solo con el reposit
 - Go para backend, motor y CLI; React + TypeScript + Vite para la web; SQLite; Playwright; Ollama opcional.
 - Puertos y adaptadores: `internal/domain` e `internal/application` no importan HTTP, Cobra, Playwright,
   SQLite ni Ollama.
-- Un único servicio de aplicación compartido por la API y la CLI. Sin lógica de scraping en `cmd/` ni en handlers.
+- Un único servicio de aplicación compartido por la API y la CLI (`application.JobService`, cableado en
+  `internal/bootstrap`). Sin lógica de scraping en `cmd/`, `internal/cli` ni `internal/api`.
+- Las migraciones de `migrations/` no se modifican una vez en un commit: los cambios van en un archivo nuevo.
 - Las recetas son declarativas. La salida del modelo es entrada no confiable: nunca se ejecuta código generado.
 - Sin evasión de CAPTCHA, anti-bot ni login: ante un bloqueo el trabajo termina en estado `blocked`.
 - La suite normal de pruebas no depende de Internet, Ollama ni sitios de terceros.
@@ -35,9 +37,10 @@ El objetivo es que cualquier agente pueda retomar el trabajo solo con el reposit
 
 ## Comandos
 
-- `make check` — `go vet`, pruebas rápidas y comprobación de formato. Ejecútalo antes de cada commit.
+- `make check` — `go vet`, pruebas rápidas con `-race` y comprobación de formato. Ejecútalo antes de cada commit.
 - `make test-browser` — pruebas de integración con Chromium real (build tag `browser`).
-- `make build` — genera `bin/adaptive-scraper` y `bin/demosite`.
+- `make build` — genera `bin/adaptive-scraper`, `bin/adaptive-scraper-server` y `bin/demosite`.
+- `make server` — API HTTP en `127.0.0.1:8080`; los datos van a `data/` (ignorado por git).
 - `make demo-site` y, en otra terminal, `make demo` — ejecución completa contra el sitio local.
 - `make install-browsers` — instala el driver de Playwright y Chromium (una vez por versión).
 - `make fmt` — aplica `gofmt`.

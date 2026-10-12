@@ -4,7 +4,8 @@ Extracción web local basada en recetas declarativas. Una receta describe qué e
 página, qué campos tiene cada uno y cómo pasar a la página siguiente; el motor la ejecuta con Playwright de
 forma determinista. En fases posteriores un modelo local (Ollama) descubrirá y reparará las recetas.
 
-**Estado: Fase 1 de 5.** Hay CLI con recetas escritas a mano. Aún no hay servidor, interfaz web ni IA.
+**Estado: Fase 2 de 5.** Hay CLI y API HTTP con recetas escritas a mano e historial en SQLite. Aún no
+hay interfaz web ni IA.
 El avance detallado está en [docs/ESTADO.md](docs/ESTADO.md) y las decisiones en
 [docs/DECISIONES.md](docs/DECISIONES.md).
 
@@ -17,7 +18,7 @@ El avance detallado está en [docs/ESTADO.md](docs/ESTADO.md) y las decisiones e
 
 ```bash
 make install-browsers   # una vez: driver de Playwright y Chromium headless
-make build              # genera bin/adaptive-scraper y bin/demosite
+make build              # genera bin/adaptive-scraper, bin/adaptive-scraper-server y bin/demosite
 ```
 
 ## Prueba rápida con el sitio de demostración
@@ -51,6 +52,67 @@ El progreso y los avisos se escriben en stderr; los datos, en stdout o en el arc
 
 Códigos de salida: `0` correcto, `1` error general, `3` bloqueo, `4` cancelación, `5` receta inválida.
 
+Cada ejecución queda registrada. Otros comandos:
+
+```text
+adaptive-scraper recipes import <archivo.json>   guarda una receta y muestra su id
+adaptive-scraper recipes list | show <id>
+adaptive-scraper recipes run <id>                acepta los mismos flags que scrape
+adaptive-scraper scrape --recipe-id <id>
+adaptive-scraper jobs list | show <id>
+adaptive-scraper version
+```
+
+`list` admite `--json`.
+
+## Servidor y API HTTP
+
+```bash
+make server             # o bin/adaptive-scraper-server; escucha en 127.0.0.1:8080
+```
+
+El servidor y la CLI comparten la base de datos (`data/adaptive-scraper.db`), así que ven las mismas
+recetas y el mismo historial si se ejecutan desde el mismo directorio.
+
+```bash
+API=http://127.0.0.1:8080/api/v1
+curl -X POST -H 'Content-Type: application/json' --data @examples/recipes/productos-demo.json $API/recipes
+curl -X POST -H 'Content-Type: application/json' -d '{"max_pages": 5}' $API/recipes/<id>/run
+curl -N $API/jobs/<job>/events                   # progreso en vivo (Server-Sent Events)
+curl "$API/jobs/<job>/export?format=csv"
+```
+
+| Método y ruta | Descripción |
+|---|---|
+| `POST /api/v1/jobs` | Crea y encola un trabajo. Cuerpo: `recipe_id` o `recipe`, y opcionalmente `url`, `max_pages`, `max_records`, `headless`. Responde `202`. |
+| `GET /api/v1/jobs` | Historial; admite `status` y `limit`. |
+| `GET /api/v1/jobs/{id}` | Estado, contadores, avisos y error. |
+| `POST /api/v1/jobs/{id}/cancel` | Cancela un trabajo en cola o en curso. |
+| `GET /api/v1/jobs/{id}/records` | Registros paginados (`offset`, `limit`). |
+| `GET /api/v1/jobs/{id}/events` | SSE: `job.started`, `page.opened`, `records.extracted`, `job.completed`, `job.failed`, `job.blocked`, `job.cancelled`. Reanuda con `Last-Event-ID`. |
+| `GET /api/v1/jobs/{id}/export?format=csv\|json` | Descarga de resultados. |
+| `GET`, `POST /api/v1/recipes` | Lista o crea recetas. |
+| `GET`, `PUT`, `DELETE /api/v1/recipes/{id}` | Lee, actualiza (nueva versión) o borra. |
+| `POST /api/v1/recipes/{id}/run` | Ejecuta una receta guardada. |
+| `GET /healthz` | Comprobación de salud. |
+
+Los `POST` requieren `Content-Type: application/json`. Los errores tienen la forma `{"error": "..."}`.
+
+Estados de un trabajo: `queued` → `running` → `completed`, `failed`, `blocked` o `cancelled`.
+
+## Configuración
+
+Variables de entorno o archivo `.env` (ver [.env.example](.env.example)):
+
+| Variable | Por defecto | Descripción |
+|---|---|---|
+| `APP_HTTP_ADDR` | `127.0.0.1:8080` | Dirección del servidor. |
+| `APP_DATA_DIR` | `data` | Directorio de datos. |
+| `APP_DATABASE_PATH` | `<APP_DATA_DIR>/adaptive-scraper.db` | Base SQLite. |
+| `APP_MAX_CONCURRENT_JOBS` | `2` | Navegadores simultáneos en el servidor. |
+| `APP_JOB_TIMEOUT` | `10m` | Duración máxima de un trabajo. |
+| `PLAYWRIGHT_HEADLESS` | `true` | Navegador sin ventana. |
+
 ## Formato de una receta
 
 ```json
@@ -77,7 +139,7 @@ Códigos de salida: `0` correcto, `1` error general, `3` bloqueo, `4` cancelaci�
 ## Desarrollo
 
 ```bash
-make check          # vet, pruebas rápidas y formato; no necesita navegador ni Internet
+make check          # vet, pruebas con -race y formato; no necesita navegador ni Internet
 make test-browser   # pruebas de integración con Chromium contra un servidor local
 ```
 
@@ -87,4 +149,5 @@ AdaptiveScraper no resuelve CAPTCHA, no evade sistemas anti-bot y no elude contr
 usa es responsable de respetar las condiciones de uso de cada sitio, `robots.txt`, los derechos sobre los
 datos y los límites de acceso.
 
-La protección contra SSRF todavía no está implementada: no lo ejecutes con recetas o URL de origen no confiable.
+La protección contra SSRF todavía no está implementada y la API no tiene autenticación: no ejecutes recetas
+o URL de origen no confiable ni expongas el servidor fuera de `127.0.0.1`.
