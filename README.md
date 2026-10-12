@@ -9,9 +9,9 @@ lenguaje natural y la **repara** cuando el sitio cambia. El modelo no controla e
 selectores: elige entre candidatos que la aplicación calcula, y una vez que hay receta las ejecuciones no
 lo necesitan.
 
-**Estado: Fase 4 de 5.** Funcionan la interfaz web, la CLI, la API HTTP y la IA. Falta el empaquetado con
-Docker y el endurecimiento de seguridad. El avance detallado está en [docs/ESTADO.md](docs/ESTADO.md) y las
-decisiones en [docs/DECISIONES.md](docs/DECISIONES.md).
+**Estado: las cinco fases del MVP están implementadas.** El avance y los pendientes están en
+[docs/ESTADO.md](docs/ESTADO.md), el diseño en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) y el porqué de
+cada decisión en [docs/DECISIONES.md](docs/DECISIONES.md).
 
 **¿Primera vez?** La [guía de uso](docs/GUIA_DE_USO.md) explica paso a paso la instalación, la
 configuración y cómo escribir y reutilizar recetas.
@@ -89,6 +89,26 @@ make demo-site          # terminal 1: sirve examples/demo en http://127.0.0.1:80
 make demo               # terminal 2: escribe bin/productos.csv
 ```
 
+El sitio de demostración está en `127.0.0.1`, una dirección que la aplicación bloquea por defecto (ver
+[Seguridad](#seguridad)). `make demo` lo permite por ti; para usarlo con otros comandos o con el servidor,
+pon `APP_ALLOW_PRIVATE_NETWORKS=true` en tu `.env`.
+
+## Con Docker
+
+```bash
+docker compose up -d --build        # interfaz en http://127.0.0.1:8080
+```
+
+Con IA, usando Ollama dentro de Docker:
+
+```bash
+AI_ENABLED=true docker compose --profile ai up -d --build
+docker compose exec ollama ollama pull llama3.2:3b
+```
+
+Los datos quedan en el volumen `scraper-data`. La línea de comandos también está en la imagen:
+`docker compose exec app adaptive-scraper jobs list`.
+
 ## Uso
 
 ```bash
@@ -156,6 +176,7 @@ curl "$API/jobs/<job>/export?format=csv"
 | `GET /api/v1/jobs/{id}/records` | Registros paginados (`offset`, `limit`). |
 | `GET /api/v1/jobs/{id}/events` | SSE: `job.started`, `page.opened`, `recipe.discovered`, `recipe.validated`, `recipe.repairing`, `records.extracted`, `job.completed`, `job.failed`, `job.blocked`, `job.cancelled`. Reanuda con `Last-Event-ID`. |
 | `GET /api/v1/jobs/{id}/export?format=csv\|json` | Descarga de resultados. |
+| `GET /api/v1/jobs/{id}/diagnostics` | Archivos de diagnóstico disponibles; cada uno en `/diagnostics/{nombre}`. |
 | `GET`, `POST /api/v1/recipes` | Lista o crea recetas. |
 | `GET`, `PUT`, `DELETE /api/v1/recipes/{id}` | Lee, actualiza (nueva versión) o borra. |
 | `POST /api/v1/recipes/{id}/run` | Ejecuta una receta guardada. |
@@ -179,6 +200,11 @@ Variables de entorno o archivo `.env` (ver [.env.example](.env.example)):
 | `APP_JOB_TIMEOUT` | `10m` | Duración máxima de un trabajo. |
 | `PLAYWRIGHT_HEADLESS` | `true` | Navegador sin ventana. |
 | `APP_WEB_DIR` | `web/dist` | Interfaz web compilada. |
+| `APP_ALLOW_PRIVATE_NETWORKS` | `false` | Permite navegar a este equipo y a redes privadas. |
+| `APP_MAX_RESPONSE_MB` | `256` | Megabytes que el navegador recibe por conexión como máximo. |
+| `APP_ALLOWED_HOSTS` | vacío | Nombres adicionales aceptados en la cabecera `Host` del servidor. |
+| `APP_DIAGNOSTICS` | `false` | Guarda captura y traza de los trabajos que fallan. |
+| `APP_DIAGNOSTICS_RETENTION` | `168h` | Cuánto se conservan. |
 | `AI_ENABLED` | `false` | Activa el descubrimiento y la reparación de recetas. |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Dirección de Ollama. |
 | `OLLAMA_MODEL` | `llama3.2:3b` | Modelo a usar. |
@@ -217,11 +243,29 @@ make web-check      # tipos y compilación de la interfaz web
 make test-ai        # recorrido real con el modelo configurado (requiere Ollama)
 ```
 
+## Seguridad
+
+- **Destinos de red.** El navegador solo puede llegar a direcciones públicas. Todo su tráfico pasa por un
+  proxy interno que bloquea `localhost`, redes privadas, link-local y metadatos de nube, también cuando se
+  llega a ellos por una redirección o un subrecurso. `APP_ALLOW_PRIVATE_NETWORKS=true` lo desactiva.
+- **API local.** Escucha solo en `127.0.0.1`, rechaza cabeceras `Host` ajenas y exige JSON en los `POST`.
+  No tiene autenticación: no la publiques en una red.
+- **Recetas y modelo.** Una receta solo contiene selectores CSS y nombres; nada de lo que escribe un
+  usuario o propone el modelo se ejecuta como código.
+- **Descargas** desactivadas y **tiempos máximos** en navegación, acciones, consultas al modelo y trabajos.
+
+## Diagnóstico de fallos
+
+Con `APP_DIAGNOSTICS=true`, cuando un trabajo falla o queda bloqueado se guardan en
+`<APP_DATA_DIR>/diagnostics/<trabajo>/` una captura de la página y una traza de Playwright, que puedes abrir
+en [trace.playwright.dev](https://trace.playwright.dev). La interfaz web las muestra en el detalle del
+trabajo. Las capturas contienen el contenido de la página; el servidor las borra pasado
+`APP_DIAGNOSTICS_RETENTION`.
+
 ## Uso responsable
 
 AdaptiveScraper no resuelve CAPTCHA, no evade sistemas anti-bot y no elude controles de acceso. Quien lo
 usa es responsable de respetar las condiciones de uso de cada sitio, `robots.txt`, los derechos sobre los
 datos y los límites de acceso.
 
-La protección contra SSRF todavía no está implementada y la API no tiene autenticación: no ejecutes recetas
-o URL de origen no confiable ni expongas el servidor fuera de `127.0.0.1`.
+La API no tiene autenticación: úsala solo en tu equipo.

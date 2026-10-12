@@ -1,0 +1,44 @@
+# Uso:
+#   docker compose up -d --build                      # sin IA
+#   AI_ENABLED=true docker compose --profile ai up -d --build
+#   docker compose exec ollama ollama pull llama3.2:3b
+#
+# La interfaz queda en http://127.0.0.1:8080
+
+services:
+  app:
+    build: .
+    image: adaptive-scraper:latest
+    # Solo accesible desde este equipo: la API no tiene autenticación.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - scraper-data:/data
+    environment:
+      APP_MAX_CONCURRENT_JOBS: ${APP_MAX_CONCURRENT_JOBS:-2}
+      APP_JOB_TIMEOUT: ${APP_JOB_TIMEOUT:-10m}
+      APP_ALLOW_PRIVATE_NETWORKS: ${APP_ALLOW_PRIVATE_NETWORKS:-false}
+      APP_ALLOWED_HOSTS: ${APP_ALLOWED_HOSTS:-}
+      APP_DIAGNOSTICS: ${APP_DIAGNOSTICS:-false}
+      APP_DIAGNOSTICS_RETENTION: ${APP_DIAGNOSTICS_RETENTION:-168h}
+      AI_ENABLED: ${AI_ENABLED:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      AI_MAX_REPAIRS: ${AI_MAX_REPAIRS:-2}
+      AI_TIMEOUT: ${AI_TIMEOUT:-5m}
+    # Chromium necesita más memoria compartida que los 64 MB por defecto.
+    shm_size: "1gb"
+    init: true
+    restart: unless-stopped
+
+  # Modelo local, solo con el perfil "ai". No publica puertos: solo lo usa app.
+  ollama:
+    image: ollama/ollama
+    profiles: ["ai"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  scraper-data:
+  ollama-models:

@@ -211,11 +211,51 @@ Formato: `D-NNN — título`, fecha, estado (propuesta / aceptada / sustituida),
   prompt nombró los campos en inglés y añadió una columna no pedida). Cualquier cambio en
   `internal/intelligence/provider.go` debe ir seguido de varias pasadas de `make test-ai`.
 
-## Propuestas pendientes de confirmar (aún no son decisiones)
+### D-022 — La política de red se aplica con un proxy local, no con `Route`
 
-- **P-5 — SSRF aplicado en el navegador**, interceptando todas las peticiones (`Route`) y validando host e IP
-  de cada una, no solo con una resolución DNS previa (que es vulnerable a DNS rebinding y no cubre
-  subrecursos ni redirecciones).
+- Fecha: 2026-10-12. Estado: aceptada. Sustituye a la propuesta P-5.
+- Contexto: interceptar peticiones con `Route` de Playwright no ve los saltos de una redirección, y validar
+  el DNS antes de navegar deja una segunda resolución en manos de Chromium (DNS rebinding).
+- Decisión: `internal/netguard` arranca un proxy HTTP en loopback y Chromium se lanza con ese proxy
+  (`<-loopback>` para que tampoco localhost lo evite). El proxy resuelve cada destino, rechaza el host si
+  alguna de sus direcciones es local, privada o reservada, y conecta a la dirección ya comprobada. Atiende
+  `CONNECT` (HTTPS y WebSockets) y HTTP plano, sin seguir redirecciones por su cuenta. `Navigate` hace además
+  una comprobación previa solo para dar un mensaje claro.
+- `APP_ALLOW_PRIVATE_NETWORKS=true` lo desactiva; hace falta para el sitio de demostración (127.0.0.1) y
+  para las pruebas de navegador. `Policy.Blocked` permite a las pruebas prohibir 127.0.0.2 con lo demás abierto.
+- Consecuencias: las descargas están desactivadas y hay un límite de bytes por conexión
+  (`APP_MAX_RESPONSE_MB`, 256 por defecto); con HTTP/2 una conexión transporta muchas respuestas, así que es
+  un tope grueso, no por recurso. Cualquier proceso local puede usar el proxy mientras dura, pero solo hacia
+  destinos que la política permite.
+
+### D-023 — Validación de `Host` en la API
+
+- Fecha: 2026-10-12. Estado: aceptada. Completa D-013.
+- Decisión: se rechaza con 403 toda petición cuya cabecera `Host` no sea `localhost`, una IP de loopback o
+  un nombre listado en `APP_ALLOWED_HOSTS`.
+- Consecuencias: quien publique el servidor con otro nombre debe declararlo. La API sigue sin autenticación.
+
+### D-024 — Diagnósticos de trabajos fallidos
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: con `APP_DIAGNOSTICS=true` (desactivado por defecto: las capturas contienen el contenido de la
+  página y ocupan disco) cada sesión graba una traza de Playwright; si el trabajo termina `failed` o
+  `blocked` se guardan `screenshot.png` y `trace.zip` en `<APP_DATA_DIR>/diagnostics/<job>/`, y si termina
+  bien se descartan. El servidor borra las carpetas con más de `APP_DIAGNOSTICS_RETENTION` (168 h) al
+  arrancar y cada hora. La API solo sirve esos dos nombres de archivo.
+- Consecuencias: tras una cancelación o al vencer el tiempo máximo no hay diagnóstico, porque el navegador
+  ya está cerrado. La CLI guarda diagnósticos pero no aplica la retención; la aplica el servidor.
+
+### D-025 — Imagen Docker
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: `Dockerfile` en tres etapas (interfaz con Node, binarios estáticos con Go, imagen final sobre
+  `debian:bookworm-slim`). El instalador de `playwright-go` se compila en la etapa de Go y se usa en la
+  final para descargar el driver y Chromium headless con sus bibliotecas. Usuario sin privilegios, datos en
+  el volumen `/data`. `compose.yaml` publica el puerto solo en `127.0.0.1` y ofrece Ollama como servicio
+  opcional (perfil `ai`).
+- Consecuencias: en el contenedor el servidor escucha en `0.0.0.0`; el acceso lo limita la publicación del
+  puerto. El modo con ventana no está disponible en Docker.
 
 ## Riesgos abiertos
 

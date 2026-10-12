@@ -53,6 +53,9 @@ La aplicación se usa de tres maneras, que comparten las mismas recetas y el mis
 Hace falta conexión a Internet durante la instalación. Después, la aplicación solo se conecta a los sitios
 que le pidas extraer.
 
+Si prefieres Docker, no necesitas nada de lo anterior: `docker compose up -d --build` deja la interfaz en
+`http://127.0.0.1:8080`. El resto de esta guía describe la instalación sin Docker.
+
 ### Pasos
 
 Desde la carpeta del proyecto:
@@ -86,6 +89,16 @@ marcha:
 ```bash
 make demo-site          # sirve el sitio en http://127.0.0.1:8090
 ```
+
+Ese sitio está en tu propio equipo, y por seguridad la aplicación no navega a direcciones locales salvo
+que se lo permitas. Para practicar con él, crea el archivo `.env` con este permiso:
+
+```bash
+cp .env.example .env
+```
+
+y cambia en él la línea `APP_ALLOW_PRIVATE_NETWORKS=false` por `APP_ALLOW_PRIVATE_NETWORKS=true`. Cuando
+pases a sitios reales de Internet puedes volver a dejarlo en `false`.
 
 ### Desde la línea de comandos
 
@@ -128,12 +141,8 @@ receta queda disponible en la sección **Recetas** para volver a usarla.
 
 ## 4. Configuración
 
-La configuración se hace con variables de entorno o, más cómodo, con un archivo `.env` en la carpeta del
-proyecto:
-
-```bash
-cp .env.example .env    # y edita .env
-```
+La configuración se hace con variables de entorno o, más cómodo, con el archivo `.env` de la carpeta del
+proyecto (créalo con `cp .env.example .env` si aún no existe).
 
 Todas las variables son opcionales.
 
@@ -146,14 +155,23 @@ Todas las variables son opcionales.
 | `APP_JOB_TIMEOUT` | `10m` | Tiempo máximo de una extracción. |
 | `PLAYWRIGHT_HEADLESS` | `true` | `false` muestra la ventana del navegador mientras trabaja. |
 | `APP_WEB_DIR` | `web/dist` | Dónde está la interfaz web compilada. |
+| `APP_ALLOW_PRIVATE_NETWORKS` | `false` | `true` permite extraer de tu propio equipo o de tu red local. |
+| `APP_MAX_RESPONSE_MB` | `256` | Megabytes que el navegador puede recibir por conexión. |
+| `APP_ALLOWED_HOSTS` | vacío | Otros nombres con los que se puede abrir el servidor. |
+| `APP_DIAGNOSTICS` | `false` | `true` guarda una captura y una traza cuando un trabajo falla. |
+| `APP_DIAGNOSTICS_RETENTION` | `168h` | Cuánto tiempo se conservan. |
 | `AI_ENABLED` | `false` | Activa la IA (sección 6). |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Dónde está Ollama. |
 | `OLLAMA_MODEL` | `llama3.2:3b` | Qué modelo usa la IA. |
 | `AI_MAX_REPAIRS` | `2` | Cuántas veces intenta reparar una receta rota. |
 | `AI_TIMEOUT` | `5m` | Tiempo máximo de cada consulta al modelo. |
 
-Tres cosas que conviene saber:
+Cuatro cosas que conviene saber:
 
+- **Por defecto solo se navega a Internet.** Las direcciones de tu equipo y de tu red local (`localhost`,
+  `127.0.0.1`, `192.168.x.x`, `10.x.x.x`) están bloqueadas, para que nadie pueda usar la aplicación para
+  asomarse a tus servicios internos. Si lo que quieres extraer está precisamente ahí, pon
+  `APP_ALLOW_PRIVATE_NETWORKS=true`.
 - **Los datos se guardan en la carpeta desde la que ejecutas el programa** (`data/`, salvo que la cambies).
   Si lanzas la línea de comandos y el servidor desde la misma carpeta, comparten recetas e historial. Si los
   lanzas desde carpetas distintas, no. Para evitar sorpresas, pon una ruta absoluta en `APP_DATA_DIR`.
@@ -455,6 +473,17 @@ datos, repetirlo o guardar su receta.
 
 Una receta inválida termina con el código 5, antes de crear ningún trabajo.
 
+### Ver por qué falló un trabajo
+
+Con `APP_DIAGNOSTICS=true` en `.env`, cuando un trabajo falla o queda bloqueado la aplicación guarda una
+captura de la página tal como estaba en ese momento. En la interfaz web aparece en el detalle del trabajo,
+en el apartado **Diagnóstico**; en disco está en `data/diagnostics/<id del trabajo>/screenshot.png`. Suele
+bastar para ver si el sitio pidió iniciar sesión, mostró un aviso de cookies o cambió de diseño.
+
+Junto a la captura se guarda `trace.zip`, un registro detallado que se abre arrastrándolo a
+[trace.playwright.dev](https://trace.playwright.dev). Las capturas contienen lo que mostraba la página, así
+que el servidor las borra pasados siete días.
+
 ### Avisos habituales
 
 | Aviso | Qué significa |
@@ -479,6 +508,9 @@ Los avisos no descartan datos: los registros se guardan igualmente.
 | `el host "..." no está permitido por la receta` | `--url` apunta a otro sitio. Añádelo a `allowed_hosts` o crea otra receta. |
 | `la navegación salió de los hosts permitidos` | El sitio redirige a otro dominio (por ejemplo, a `www.`). Añade ese dominio a `allowed_hosts`. |
 | `acceso bloqueado` | El sitio exige iniciar sesión o verificación humana. La aplicación no lo sortea. |
+| `destino no permitido por la política de red` | La dirección es de tu equipo o de tu red local. Si es intencionado, pon `APP_ALLOW_PRIVATE_NETWORKS=true` en `.env`. |
+| El navegador responde `cabecera Host no permitida` | Abriste el servidor con un nombre distinto de `localhost` o `127.0.0.1`. Añádelo a `APP_ALLOWED_HOSTS`. |
+| No sé por qué falla | Activa `APP_DIAGNOSTICS=true` y mira la captura (sección 7), o ejecuta con `--headless=false`. |
 | La web dice que la IA no está disponible | Ejecuta `bin/adaptive-scraper ai status` y sigue lo que indique `message`. |
 | `falta la receta; para descubrirla... active la IA` | Usaste `--instruction` con la IA desactivada. Pon `AI_ENABLED=true` en `.env`. |
 | No aparecen las recetas que guardaste | Ejecutas el programa desde otra carpeta. Usa una ruta absoluta en `APP_DATA_DIR`. |
@@ -492,5 +524,4 @@ Los avisos no descartan datos: los registros se guardan igualmente.
   los datos y los límites de acceso. Empieza siempre con pocas páginas.
 - Solo extrae listados: elementos repetidos en una página, con paginación por botón. No sigue los enlaces
   de cada elemento a su página de detalle, no hace scroll infinito y no lee contenido dentro de marcos.
-- El servidor no tiene contraseña y todavía no filtra las direcciones a las que navega. Úsalo solo en tu
-  equipo y solo con recetas tuyas o de confianza.
+- El servidor no tiene contraseña. Úsalo solo en tu equipo.

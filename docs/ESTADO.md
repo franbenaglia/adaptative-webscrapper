@@ -4,13 +4,14 @@
 
 ## Resumen
 
-Fases 1 a 4 terminadas y verificadas. Hay motor determinista con Playwright, CLI, persistencia SQLite, cola
-de trabajos, API HTTP con SSE, interfaz web e IA local (descubrir y reparar recetas con Ollama). Falta el
-empaquetado y el endurecimiento.
+Las cinco fases del MVP están implementadas: motor determinista con Playwright, CLI, persistencia SQLite,
+cola de trabajos, API HTTP con SSE, interfaz web, IA local (descubrir y reparar recetas con Ollama),
+política de red, diagnósticos y empaquetado Docker.
 
 ## Fase actual
 
-**Fase 5 — Empaquetado y endurecimiento**, en curso.
+**Fase 5 — Empaquetado y endurecimiento**: código y documentación terminados. Ver "En curso" para lo que
+falta verificar de Docker.
 
 ## Hecho
 
@@ -18,48 +19,51 @@ empaquetado y el endurecimiento.
 - Fase 1 (2026-10-12): dominio, motor, adaptador Playwright, exportadores, CLI, sitio de demostración.
 - Fase 2 (2026-10-12): estados de trabajo, SQLite, `JobService`, cola, API `/api/v1` con SSE, `cmd/server`.
 - Fase 3 (2026-10-12): interfaz web en `web/`, servida por `cmd/server`.
-- Fase 4 (2026-10-12), verificada con `make check`, `make test-browser`, `make web-check`, `make test-ai`
-  (tres pasadas en verde con `llama3.2:3b`) y ejecuciones reales desde la CLI y desde la web:
-  - `internal/browser/snapshot.go`: resumen de página en candidatos numerados y detección de bloqueos.
-  - `internal/intelligence`: proveedor (prompt, esquema cerrado, traducción a receta) y cliente de Ollama.
-  - `internal/application/service.go`: descubrir, validar, probar y reparar (solo en la primera página).
-  - `instruction` en dominio, API, CLI (`--instruction`, `--save-recipe`, `ai status`) y web.
-  - Migración `0002_ai.sql`; páginas de demostración `tabla.html`, `productos-v2.html`, `login.html`.
-  - `docs/GUIA_DE_USO.md`: guía para usuarios finales (mantenerla al día, ver `CLAUDE.md`).
+- Fase 4 (2026-10-12): resumen de página en candidatos, proveedor de IA, Ollama, descubrir y reparar,
+  detección de bloqueos. Verificado con `llama3.2:3b`.
+- Fase 5 (2026-10-12), verificada con `make check`, `make test-browser` y ejecuciones reales de los binarios
+  (bloqueo de 127.0.0.1 por defecto, extracción de un sitio HTTPS público a través del proxy, captura y
+  traza de un trabajo bloqueado servidas por la API, rechazo de `Host` ajeno):
+  - `internal/netguard`: política de red y proxy de filtrado; Chromium lo usa para todo su tráfico (D-022).
+  - `internal/api`: validación de `Host` (D-023) y endpoints de diagnósticos.
+  - Capturas y trazas al fallar, con retención (D-024); la web las muestra en el detalle del trabajo.
+  - `Dockerfile`, `compose.yaml`, `.dockerignore` (D-025).
+  - `docs/ARQUITECTURA.md`.
 
 ## En curso
 
-- Fase 5, en commits separados: (a) `internal/netguard` (política de red + proxy de filtrado que usa
-  Chromium) y validación de `Host` en la API; (b) capturas y trazas al fallar, con retención;
-  (c) `Dockerfile` y `compose.yaml`; (d) `docs/ARQUITECTURA.md` y cierre. `git log` dice cuáles están hechos.
+- Verificar la imagen Docker: `docker build -t adaptive-scraper:latest .` y después arrancar con
+  `docker compose up -d`, comprobar `/healthz`, la interfaz y una extracción real. Si esta nota sigue aquí,
+  la imagen no se ha comprobado de extremo a extremo.
 
 ## Siguiente paso
 
-Empezar la Fase 5 por este orden:
+El MVP de la especificación está completo. Antes de añadir nada, pregunta al usuario qué quiere priorizar.
+Candidatos, de más a menos valioso según lo aprendido:
 
-1. **SSRF** (P-5): interceptar todas las peticiones del navegador con `Route`, resolver el host y bloquear
-   loopback, link-local, redes privadas y metadatos; revalidar redirecciones; `APP_ALLOW_PRIVATE_NETWORKS`
-   para desarrollo (el sitio de demostración vive en `127.0.0.1`, así que las pruebas lo necesitan).
-   Bloquear descargas y limitar redirecciones.
-2. Validar la cabecera `Host` en la API (DNS rebinding, D-013).
-3. Captura de pantalla y traza de Playwright al fallar un trabajo, con retención configurable.
-4. `Dockerfile` y `compose.yaml`: binarios, `web/dist`, Chromium y, opcionalmente, un servicio Ollama.
-5. Repaso de timeouts y límites; documento breve de arquitectura si el usuario lo quiere aparte de
-   `docs/DECISIONES.md`.
+1. Probar la IA en sitios reales y con otros modelos; ajustar el resumen de página (`snapshotScript`) con
+   lo que falle.
+2. Modo `--server` de la CLI (enviar el trabajo a un servidor en marcha).
+3. Reparación cuando la rotura aparece en páginas posteriores a la primera.
+4. Tipos de campo `date` y `money`; comparación con ejecuciones anteriores ("cambios anormales").
+5. Otras paginaciones (scroll infinito, enlaces numerados) y páginas de detalle.
+6. Pruebas automáticas de la interfaz web; endpoint para consultar versiones anteriores de una receta.
+7. Autenticación en la API si alguna vez se publica fuera de loopback.
 
-## Pendientes conocidos
+## Limitaciones conocidas
 
-- Sin protección SSRF ni validación de `Host` (Fase 5): no exponer el servicio fuera de loopback ni
-  ejecutar recetas de origen no confiable (D-008, D-013).
-- La detección de login y CAPTCHA es heurística (D-018).
+- La API no tiene autenticación (D-013, D-023): solo para uso en loopback.
 - La IA solo se ha probado sobre el sitio de demostración y con un modelo (D-021). No detecta que el modelo
   cruce dos campos del mismo tipo (D-020). Solo repara roturas visibles en la primera página (D-017).
-- `number` es el único tipo numérico; faltan fechas y moneda (D-006).
-- Falta comparar resultados con ejecuciones anteriores ("cambios anormales"); los datos ya se guardan.
-- Sin capturas ni trazas de Playwright al fallar, ni política de retención (Fase 5).
+- La detección de login y CAPTCHA es heurística (D-018).
+- El límite de tamaño de respuesta es por conexión, no por recurso (D-022).
+- No hay diagnóstico tras una cancelación o un tiempo máximo; la CLI no aplica la retención (D-024).
+- Solo listados con paginación por botón: sin páginas de detalle, scroll infinito ni iframes (R-5).
+- `number` es el único tipo numérico; faltan fechas y moneda (D-006). No se comparan resultados con
+  ejecuciones anteriores.
 - La CLI no tiene modo `--server`; un trabajo en curso solo se cancela desde el proceso que lo ejecuta (D-010).
-- No hay endpoint para consultar versiones anteriores de una receta (se guardan en `recipe_versions`).
-- La interfaz web no tiene pruebas automáticas (D-015) ni editor visual de selectores (fuera del MVP).
+- La interfaz web no tiene pruebas automáticas (D-015). No hay endpoint para versiones anteriores de recetas.
+- El servicio Ollama de `compose.yaml` (perfil `ai`) no se ha probado.
 
 ## Entorno de desarrollo (comprobado el 2026-10-12)
 

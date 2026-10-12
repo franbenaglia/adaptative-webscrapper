@@ -3,8 +3,9 @@
 Si acabas de llegar sin contexto (sesión nueva, corte o compactación), lee en este orden:
 
 1. `docs/ESTADO.md` — en qué fase estamos, qué está hecho, qué sigue. **Empieza por aquí.**
-2. `docs/DECISIONES.md` — decisiones ya tomadas y su porqué. No las reabras sin motivo nuevo.
-3. `Claude_Code_AdaptiveScraper.md` — especificación original del usuario (fuente de verdad del alcance).
+2. `docs/ARQUITECTURA.md` — mapa de paquetes, recorrido de un trabajo y medidas de seguridad.
+3. `docs/DECISIONES.md` — decisiones ya tomadas y su porqué. No las reabras sin motivo nuevo.
+4. `Claude_Code_AdaptiveScraper.md` — especificación original del usuario (fuente de verdad del alcance).
 
 `docs/GUIA_DE_USO.md` es la guía para usuarios finales: si cambias comandos, opciones, variables de
 configuración, el formato de las recetas o los mensajes que cita, actualízala en el mismo commit.
@@ -42,6 +43,8 @@ El objetivo es que cualquier agente pueda retomar el trabajo solo con el reposit
 
 - `make check` — `go vet`, pruebas rápidas con `-race` y comprobación de formato. Ejecútalo antes de cada commit.
 - `make test-browser` — pruebas de integración con Chromium real (build tag `browser`).
+- `make test-ai` — recorrido con un modelo real; requiere `ollama serve` y el modelo. Ejecútalo varias
+  veces tras tocar `internal/intelligence/provider.go` (D-021).
 - `make build` — genera `bin/adaptive-scraper`, `bin/adaptive-scraper-server` y `bin/demosite`.
 - `make server` — API HTTP en `127.0.0.1:8080`; los datos van a `data/` (ignorado por git).
 - `make demo-site` y, en otra terminal, `make demo` — ejecución completa contra el sitio local.
@@ -51,3 +54,7 @@ El objetivo es que cualquier agente pueda retomar el trabajo solo con el reposit
   que `make server` publica en la raíz). `make web-dev` arranca Vite con proxy hacia el servidor.
 
 El módulo Go se llama `adaptive-scraper`; Go está en `~/.local/bin/go`.
+
+El sitio de demostración y los servidores de prueba viven en `127.0.0.1`, que la política de red bloquea
+por defecto: para ejecutar binarios contra ellos hace falta `APP_ALLOW_PRIVATE_NETWORKS=true` (el `.env`
+local del usuario ya lo tiene; las pruebas usan `browser.Options` con `AllowPrivate`).
