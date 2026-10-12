@@ -6,6 +6,9 @@ Si acabas de llegar sin contexto (sesión nueva, corte o compactación), lee en 
 2. `docs/DECISIONES.md` — decisiones ya tomadas y su porqué. No las reabras sin motivo nuevo.
 3. `Claude_Code_AdaptiveScraper.md` — especificación original del usuario (fuente de verdad del alcance).
 
+`docs/GUIA_DE_USO.md` es la guía para usuarios finales: si cambias comandos, opciones, variables de
+configuración, el formato de las recetas o los mensajes que cita, actualízala en el mismo commit.
+
 Después comprueba el estado real antes de fiarte de los documentos: `git status`, `git log --oneline -15`
 y la suite de pruebas. Si el código y `docs/ESTADO.md` se contradicen, manda el código; corrige el documento.
 

@@ -13,6 +13,9 @@ lo necesitan.
 Docker y el endurecimiento de seguridad. El avance detallado está en [docs/ESTADO.md](docs/ESTADO.md) y las
 decisiones en [docs/DECISIONES.md](docs/DECISIONES.md).
 
+**¿Primera vez?** La [guía de uso](docs/GUIA_DE_USO.md) explica paso a paso la instalación, la
+configuración y cómo escribir y reutilizar recetas.
+
 ## Requisitos
 
 - Go 1.27 o posterior y `make`.
@@ -68,7 +71,7 @@ Si `make test-ai` pasa, ponlo en `OLLAMA_MODEL` dentro de `.env`.
 ## Interfaz web
 
 ```bash
-make server             # abre http://127.0.0.1:8080
+make server             # después abre http://127.0.0.1:8080 en el navegador
 ```
 
 - **Nueva extracción**: describe los datos (con IA), elige una receta guardada o pega una en JSON; ajusta
