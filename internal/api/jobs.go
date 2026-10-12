@@ -14,12 +14,13 @@ import (
 
 // jobBody es el cuerpo de POST /jobs y POST /recipes/{id}/run.
 type jobBody struct {
-	URL        string         `json:"url"`
-	RecipeID   string         `json:"recipe_id"`
-	Recipe     *domain.Recipe `json:"recipe"`
-	MaxPages   int            `json:"max_pages"`
-	MaxRecords int            `json:"max_records"`
-	Headless   *bool          `json:"headless"`
+	URL         string         `json:"url"`
+	Instruction string         `json:"instruction"`
+	RecipeID    string         `json:"recipe_id"`
+	Recipe      *domain.Recipe `json:"recipe"`
+	MaxPages    int            `json:"max_pages"`
+	MaxRecords  int            `json:"max_records"`
+	Headless    *bool          `json:"headless"`
 }
 
 func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +54,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request, body jobBody) {
 		headless = *body.Headless
 	}
 	job, err := s.Jobs.Create(r.Context(), application.JobRequest{
-		URL: body.URL, RecipeID: body.RecipeID, Recipe: body.Recipe,
+		URL: body.URL, Instruction: body.Instruction, RecipeID: body.RecipeID, Recipe: body.Recipe,
 		MaxPages: body.MaxPages, MaxRecords: body.MaxRecords, Headless: headless,
 	})
 	if err != nil {

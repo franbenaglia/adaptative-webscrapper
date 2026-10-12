@@ -5,6 +5,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,7 +22,16 @@ type Config struct {
 	JobTimeout        time.Duration // APP_JOB_TIMEOUT
 	Headless          bool          // PLAYWRIGHT_HEADLESS
 	WebDir            string        // APP_WEB_DIR
+
+	AIEnabled     bool          // AI_ENABLED
+	OllamaBaseURL string        // OLLAMA_BASE_URL
+	OllamaModel   string        // OLLAMA_MODEL
+	AIMaxRepairs  int           // AI_MAX_REPAIRS
+	AITimeout     time.Duration // AI_TIMEOUT
 }
+
+// DefaultOllamaModel es el modelo usado si no se configura OLLAMA_MODEL.
+const DefaultOllamaModel = "llama3.2:3b"
 
 // Load lee la configuración del entorno y de ./.env si existe.
 func Load() (Config, error) {
@@ -49,6 +59,9 @@ func load(lookupEnv func(string) (string, bool), envFile string) (Config, error)
 		HTTPAddr: get("APP_HTTP_ADDR", "127.0.0.1:8080"),
 		DataDir:  get("APP_DATA_DIR", "data"),
 		WebDir:   get("APP_WEB_DIR", filepath.Join("web", "dist")),
+
+		OllamaBaseURL: get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+		OllamaModel:   get("OLLAMA_MODEL", DefaultOllamaModel),
 	}
 	cfg.DatabasePath = get("APP_DATABASE_PATH", filepath.Join(cfg.DataDir, "adaptive-scraper.db"))
 
@@ -61,6 +74,19 @@ func load(lookupEnv func(string) (string, bool), envFile string) (Config, error)
 	}
 	if cfg.Headless, err = strconv.ParseBool(get("PLAYWRIGHT_HEADLESS", "true")); err != nil {
 		return cfg, fmt.Errorf("PLAYWRIGHT_HEADLESS debe ser true o false")
+	}
+	if cfg.AIEnabled, err = strconv.ParseBool(get("AI_ENABLED", "false")); err != nil {
+		return cfg, fmt.Errorf("AI_ENABLED debe ser true o false")
+	}
+	if cfg.AIMaxRepairs, err = strconv.Atoi(get("AI_MAX_REPAIRS", "2")); err != nil || cfg.AIMaxRepairs < 0 || cfg.AIMaxRepairs > 5 {
+		return cfg, fmt.Errorf("AI_MAX_REPAIRS debe ser un entero entre 0 y 5")
+	}
+	// Generoso por defecto: sin GPU, un modelo pequeño tarda del orden de un minuto.
+	if cfg.AITimeout, err = time.ParseDuration(get("AI_TIMEOUT", "5m")); err != nil || cfg.AITimeout <= 0 {
+		return cfg, fmt.Errorf("AI_TIMEOUT debe ser una duración como 5m o 90s")
+	}
+	if u, err := url.Parse(cfg.OllamaBaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return cfg, fmt.Errorf("OLLAMA_BASE_URL debe ser una URL http o https")
 	}
 	return cfg, nil
 }

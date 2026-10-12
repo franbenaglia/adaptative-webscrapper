@@ -41,7 +41,7 @@ func run() int {
 			if err != nil {
 				return cli.Services{}, nil, err
 			}
-			return cli.Services{Jobs: app.Jobs, Recipes: app.Recipes}, func() { _ = app.Close() }, nil
+			return cli.Services{Jobs: app.Jobs, Recipes: app.Recipes, AIStatus: app.AIStatus}, func() { _ = app.Close() }, nil
 		},
 	})
 	err = root.ExecuteContext(ctx)

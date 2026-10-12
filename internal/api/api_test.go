@@ -74,7 +74,7 @@ func newServer(t *testing.T, gated bool, queue func(*application.JobService) app
 	if gated {
 		eng.gate = make(chan struct{})
 	}
-	jobs := application.NewJobService(eng, store.Jobs(), store.Recipes(), application.JobOptions{})
+	jobs := application.NewJobService(eng, store.Jobs(), store.Recipes(), application.JobOptions{AIEnabled: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	var q application.JobQueue
 	wait := func() {}
@@ -88,6 +88,9 @@ func newServer(t *testing.T, gated bool, queue func(*application.JobService) app
 	server := httptest.NewServer((&api.Server{
 		Jobs: jobs, Recipes: application.NewRecipeService(store.Recipes()), Queue: q,
 		Logger: slog.New(slog.DiscardHandler), DefaultHeadless: true,
+		AIStatus: func(context.Context) application.AIStatus {
+			return application.AIStatus{Enabled: true, Provider: "ollama", Model: "mini", Reachable: true, ModelInstalled: true, InstalledModels: []string{"mini"}}
+		},
 	}).Handler())
 	t.Cleanup(func() {
 		server.CloseClientConnections()
@@ -402,7 +405,8 @@ func TestErrorResponses(t *testing.T) {
 		{"JSON roto", "POST", "/api/v1/jobs", `{"recipe": `, 400},
 		{"campo desconocido", "POST", "/api/v1/jobs", `{"script": "alert(1)"}`, 400},
 		{"dos objetos", "POST", "/api/v1/jobs", `{} {}`, 400},
-		{"sin receta", "POST", "/api/v1/jobs", `{"url": "https://shop.example/"}`, 400},
+		{"sin receta ni instrucción", "POST", "/api/v1/jobs", `{"url": "https://shop.example/"}`, 400},
+		{"instrucción sin URL", "POST", "/api/v1/jobs", `{"instruction": "nombres"}`, 400},
 		{"receta inválida", "POST", "/api/v1/jobs", `{"recipe": {"name": "x"}}`, 400},
 		{"host no permitido", "POST", "/api/v1/jobs", `{"url": "https://evil.example/", "recipe": ` + recipeJSON + `}`, 400},
 		{"receta guardada inexistente", "POST", "/api/v1/jobs", `{"recipe_id": "nope"}`, 404},
@@ -494,5 +498,37 @@ func TestServesWebInterfaceWhenConfigured(t *testing.T) {
 		if path == "/" && !strings.Contains(string(body), "AdaptiveScraper") {
 			t.Errorf("/ no sirve index.html: %s", body)
 		}
+	}
+}
+
+func TestJobFromInstructionAndAIStatus(t *testing.T) {
+	s := newServer(t, false, nil)
+
+	var status application.AIStatus
+	if resp := s.do("GET", "/api/v1/ai", "", &status); resp.StatusCode != 200 || !status.Enabled || status.Model != "mini" || !status.ModelInstalled {
+		t.Fatalf("estado de la IA = %d %+v", resp.StatusCode, status)
+	}
+
+	job := s.createJob(`{"url": "https://shop.example/p1", "instruction": "nombre y precio de cada producto"}`)
+	if job.Instruction != "nombre y precio de cada producto" || job.Recipe.Fields == nil || len(job.Recipe.Fields) != 0 {
+		t.Errorf("trabajo creado = %+v", job)
+	}
+	if req := <-s.engine.requests; req.Recipe != nil || req.Instruction != "nombre y precio de cada producto" {
+		t.Errorf("el motor recibió %+v", req)
+	}
+	s.waitFor(job.ID, domain.JobCompleted)
+}
+
+func TestAIStatusWhenDisabled(t *testing.T) {
+	server := httptest.NewServer((&api.Server{Logger: slog.New(slog.DiscardHandler)}).Handler())
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/api/v1/ai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"enabled":false`) || !strings.Contains(string(body), `"installed_models":[]`) {
+		t.Errorf("respuesta = %d %s", resp.StatusCode, body)
 	}
 }

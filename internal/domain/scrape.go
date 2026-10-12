@@ -16,42 +16,67 @@ const (
 	LimitMaxRecords   = 100000
 )
 
-// ScrapeRequest describe una ejecución. URL vacía significa Recipe.StartURL.
-// En la Fase 1 la receta siempre llega en línea; RecipeID e Instruction se
-// añadirán con la persistencia y la IA.
+// MaxInstructionLength limita el texto libre que se envía al modelo.
+const MaxInstructionLength = 2000
+
+// ScrapeRequest describe una ejecución. Con Recipe se ejecuta esa receta (URL
+// vacía significa Recipe.StartURL). Sin Recipe hacen falta URL e Instruction:
+// la receta se descubre con IA.
 type ScrapeRequest struct {
-	URL        string
-	Recipe     *Recipe
-	MaxPages   int
-	MaxRecords int
-	Headless   bool
+	URL         string
+	Instruction string
+	Recipe      *Recipe
+	MaxPages    int
+	MaxRecords  int
+	Headless    bool
 }
 
-// ScrapeResult es el resultado de una ejecución.
+// Orígenes de la receta con la que terminó una ejecución.
+const (
+	RecipeProvided   = "provided"
+	RecipeDiscovered = "discovered"
+	RecipeRepaired   = "repaired"
+)
+
+// ScrapeResult es el resultado de una ejecución. Recipe es la receta
+// finalmente usada (nil si no llegó a haber ninguna) y RecipeOrigin indica
+// si es la recibida, una descubierta o una reparada.
 type ScrapeResult struct {
 	Fields       []FieldDefinition
 	Records      []Record
 	PagesVisited int
 	Warnings     []string
+	Recipe       *Recipe
+	RecipeOrigin string
 }
 
 // Normalize valida la solicitud y aplica valores por defecto.
 func (r ScrapeRequest) Normalize() (ScrapeRequest, error) {
+	r.Instruction = strings.TrimSpace(r.Instruction)
+	if len(r.Instruction) > MaxInstructionLength {
+		return r, fmt.Errorf("%w: la instrucción supera los %d caracteres", ErrInvalidRequest, MaxInstructionLength)
+	}
 	if r.Recipe == nil {
-		return r, fmt.Errorf("%w: falta la receta", ErrInvalidRequest)
-	}
-	if err := r.Recipe.Validate(); err != nil {
-		return r, err
-	}
-	if r.URL == "" {
-		r.URL = r.Recipe.StartURL
-	}
-	u, err := ParseHTTPURL(r.URL)
-	if err != nil {
-		return r, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
-	}
-	if !r.Recipe.AllowsHost(u.Hostname()) {
-		return r, fmt.Errorf("%w: el host %q no está permitido por la receta", ErrInvalidRequest, u.Hostname())
+		if r.Instruction == "" || r.URL == "" {
+			return r, fmt.Errorf("%w: indique una receta, o una URL y una instrucción para descubrirla", ErrInvalidRequest)
+		}
+		if _, err := ParseHTTPURL(r.URL); err != nil {
+			return r, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+		}
+	} else {
+		if err := r.Recipe.Validate(); err != nil {
+			return r, err
+		}
+		if r.URL == "" {
+			r.URL = r.Recipe.StartURL
+		}
+		u, err := ParseHTTPURL(r.URL)
+		if err != nil {
+			return r, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+		}
+		if !r.Recipe.AllowsHost(u.Hostname()) {
+			return r, fmt.Errorf("%w: el host %q no está permitido por la receta", ErrInvalidRequest, u.Hostname())
+		}
 	}
 	if r.MaxPages == 0 {
 		r.MaxPages = DefaultMaxPages

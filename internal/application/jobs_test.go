@@ -439,3 +439,112 @@ func TestRecipeServiceVersions(t *testing.T) {
 		t.Errorf("crear receta inválida = %v", err)
 	}
 }
+
+// --- Trabajos con IA ---
+
+func TestCreateFromInstructionRequiresAI(t *testing.T) {
+	ctx := context.Background()
+	request := application.JobRequest{URL: "https://shop.example/p1", Instruction: "nombre y precio"}
+
+	off := setup(t, twoPages, application.JobOptions{})
+	if _, err := off.jobs.Create(ctx, request); !errors.Is(err, domain.ErrInvalidRequest) || !strings.Contains(err.Error(), "AI_ENABLED") {
+		t.Errorf("con la IA desactivada: %v", err)
+	}
+
+	on := setup(t, twoPages, application.JobOptions{AIEnabled: true})
+	job, err := on.jobs.Create(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := on.jobs.Get(ctx, job.ID)
+	if stored.Instruction != "nombre y precio" || !stored.Recipe.IsZero() || stored.Recipe.Fields == nil || stored.RecipeOrigin != "" {
+		t.Errorf("trabajo guardado = %+v", stored)
+	}
+	if req := stored.Request(); req.Recipe != nil || req.Instruction != "nombre y precio" {
+		t.Errorf("solicitud reconstruida = %+v", req)
+	}
+	for name, bad := range map[string]application.JobRequest{
+		"sin URL":         {Instruction: "nombres"},
+		"sin instrucción": {URL: "https://shop.example/p1"},
+	} {
+		if _, err := on.jobs.Create(ctx, bad); !errors.Is(err, domain.ErrInvalidRequest) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestExecuteStoresDiscoveredRecipe(t *testing.T) {
+	ctx := context.Background()
+	discovered := *testRecipe()
+	discovered.Name = "nombre y precio"
+	engine := func(_ context.Context, request domain.ScrapeRequest, sink application.ProgressSink) (domain.ScrapeResult, error) {
+		if request.Recipe != nil || request.Instruction != "nombre y precio" {
+			t.Errorf("el motor recibió %+v", request)
+		}
+		sink.Emit(application.Event{Type: domain.EventPageOpened, Page: 1, URL: request.URL})
+		sink.Emit(application.Event{Type: domain.EventRecipeDiscovered, Page: 1, Recipe: &discovered, RecipeOrigin: domain.RecipeDiscovered, Message: "1 campos"})
+		sink.Emit(application.Event{Type: domain.EventRecipeValidated, Page: 1, Recipe: &discovered, RecipeOrigin: domain.RecipeDiscovered})
+		emitPage(sink, 1, 1, "A")
+		return domain.ScrapeResult{PagesVisited: 1, Recipe: &discovered, RecipeOrigin: domain.RecipeDiscovered}, nil
+	}
+	f := setup(t, engine, application.JobOptions{AIEnabled: true})
+	created, err := f.jobs.Create(ctx, application.JobRequest{URL: "https://shop.example/p1", Instruction: "nombre y precio"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.jobs.Execute(ctx, created.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	job, _ := f.jobs.Get(ctx, created.ID)
+	if job.Status != domain.JobCompleted || job.Recipe.ItemLocator != ".p" || job.RecipeOrigin != domain.RecipeDiscovered || job.RecordCount != 1 {
+		t.Fatalf("trabajo = %+v", job)
+	}
+	events, _ := f.jobs.Events(ctx, job.ID, 0)
+	if !strings.Contains(eventTypes(events), "recipe.discovered recipe.validated") || events[2].Message != "1 campos" {
+		t.Errorf("eventos = %q / %+v", eventTypes(events), events[2])
+	}
+	// Una receta descubierta no se guarda sola: lo decide el usuario.
+	if saved, _ := f.recipes.List(ctx); len(saved) != 0 {
+		t.Errorf("recetas guardadas = %d", len(saved))
+	}
+}
+
+func TestExecuteSavesRepairedRecipeAsNewVersion(t *testing.T) {
+	ctx := context.Background()
+	var engineErr error
+	engine := func(_ context.Context, request domain.ScrapeRequest, sink application.ProgressSink) (domain.ScrapeResult, error) {
+		repaired := *request.Recipe
+		repaired.ItemLocator = ".card"
+		emitPage(sink, 1, 1, "A")
+		return domain.ScrapeResult{PagesVisited: 1, Recipe: &repaired, RecipeOrigin: domain.RecipeRepaired}, engineErr
+	}
+	f := setup(t, engine, application.JobOptions{AIEnabled: true})
+	saved, _ := f.recipes.Create(ctx, *testRecipe())
+
+	created, _ := f.jobs.Create(ctx, application.JobRequest{RecipeID: saved.ID})
+	job, err := f.jobs.Execute(ctx, created.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, _ := f.recipes.Get(ctx, saved.ID)
+	if current.Version != 2 || current.ItemLocator != ".card" || job.Recipe.Version != 2 || job.RecipeOrigin != domain.RecipeRepaired {
+		t.Fatalf("receta guardada = %+v, trabajo = %+v", current, job.Recipe)
+	}
+	if len(job.Warnings) != 1 || !strings.Contains(job.Warnings[0], "versión 2") {
+		t.Errorf("avisos = %v", job.Warnings)
+	}
+	if versions, _ := f.store.Recipes().Versions(ctx, saved.ID); len(versions) != 2 || versions[0].ItemLocator != ".p" {
+		t.Errorf("historial de versiones = %+v", versions)
+	}
+
+	// Si el trabajo no termina bien, la receta guardada no se toca.
+	engineErr = errors.New("boom")
+	again, _ := f.jobs.Create(ctx, application.JobRequest{RecipeID: saved.ID})
+	if _, err := f.jobs.Execute(ctx, again.ID, nil); err == nil {
+		t.Fatal("se esperaba el error del motor")
+	}
+	if after, _ := f.recipes.Get(ctx, saved.ID); after.Version != 2 {
+		t.Errorf("versión tras un trabajo fallido = %d", after.Version)
+	}
+}

@@ -31,8 +31,9 @@ const (
 
 // Services son los casos de uso que necesitan los comandos.
 type Services struct {
-	Jobs    *application.JobService
-	Recipes *application.RecipeService
+	Jobs     *application.JobService
+	Recipes  *application.RecipeService
+	AIStatus func(ctx context.Context) application.AIStatus
 }
 
 // Deps son las dependencias de los comandos. Open se invoca solo cuando un
@@ -51,7 +52,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newScrapeCommand(deps), newRecipesCommand(deps), newJobsCommand(deps), newVersionCommand(deps))
+	root.AddCommand(newScrapeCommand(deps), newRecipesCommand(deps), newJobsCommand(deps), newAICommand(deps), newVersionCommand(deps))
 	return root
 }
 
@@ -71,6 +72,7 @@ type runFlags struct {
 	url, output, format  string
 	maxPages, maxRecords int
 	headless             bool
+	saveRecipe           bool
 }
 
 func (f *runFlags) register(cmd *cobra.Command, deps Deps) {
@@ -85,16 +87,17 @@ func (f *runFlags) register(cmd *cobra.Command, deps Deps) {
 
 func newScrapeCommand(deps Deps) *cobra.Command {
 	var (
-		flags      runFlags
-		recipePath string
-		recipeID   string
+		flags       runFlags
+		recipePath  string
+		recipeID    string
+		instruction string
 	)
 	cmd := &cobra.Command{
 		Use:   "scrape",
-		Short: "Ejecuta una receta y exporta los registros",
+		Short: "Extrae registros con una receta o, con IA, a partir de una instrucción",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			request := application.JobRequest{RecipeID: recipeID}
+			request := application.JobRequest{RecipeID: recipeID, Instruction: instruction}
 			switch {
 			case recipePath != "" && recipeID != "":
 				return errors.New("use --recipe o --recipe-id, no ambos")
@@ -104,8 +107,8 @@ func newScrapeCommand(deps Deps) *cobra.Command {
 					return err
 				}
 				request.Recipe = &recipe
-			case recipeID == "":
-				return errors.New("falta --recipe o --recipe-id: el descubrimiento de recetas con IA aún no está disponible")
+			case recipeID == "" && (instruction == "" || flags.url == ""):
+				return errors.New("indique --recipe o --recipe-id, o bien --url e --instruction para descubrir la receta con IA")
 			}
 			return runJob(cmd, deps, flags, request)
 		},
@@ -113,6 +116,26 @@ func newScrapeCommand(deps Deps) *cobra.Command {
 	flags.register(cmd, deps)
 	cmd.Flags().StringVar(&recipePath, "recipe", "", "archivo JSON con la receta")
 	cmd.Flags().StringVar(&recipeID, "recipe-id", "", "identificador de una receta guardada")
+	cmd.Flags().StringVar(&instruction, "instruction", "", "qué datos extraer, en lenguaje natural (requiere IA)")
+	cmd.Flags().BoolVar(&flags.saveRecipe, "save-recipe", false, "guardar la receta descubierta para reutilizarla sin IA")
+	return cmd
+}
+
+func newAICommand(deps Deps) *cobra.Command {
+	cmd := &cobra.Command{Use: "ai", Short: "Consulta el proveedor de IA"}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Muestra el modelo configurado y si está disponible",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			services, closeServices, err := deps.Open(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer closeServices()
+			return printJSON(cmd.OutOrStdout(), services.AIStatus(cmd.Context()))
+		},
+	})
 	return cmd
 }
 
@@ -145,8 +168,22 @@ func runJob(cmd *cobra.Command, deps Deps, flags runFlags, request application.J
 			fmt.Fprintf(stderr, "página %d: %s\n", e.Page, e.URL)
 		case domain.EventRecordsExtracted:
 			fmt.Fprintf(stderr, "página %d: %d registros acumulados\n", e.Page, e.Records)
+		case domain.EventRecipeDiscovered:
+			fmt.Fprintf(stderr, "receta descubierta por el modelo (%s)\n", e.Message)
+		case domain.EventRecipeRepairing:
+			fmt.Fprintf(stderr, "reparando la receta con el modelo: %s\n", e.Message)
+		case domain.EventRecipeValidated:
+			fmt.Fprintf(stderr, "receta validada: %s\n", e.Message)
 		}
 	})
+	if flags.saveRecipe && job.RecipeID == "" && !job.Recipe.IsZero() {
+		// Se guarda aunque el contexto del comando esté cancelado.
+		if saved, err := services.Recipes.Create(context.WithoutCancel(cmd.Context()), job.Recipe); err != nil {
+			fmt.Fprintln(stderr, "aviso: no se pudo guardar la receta:", err)
+		} else {
+			fmt.Fprintf(stderr, "receta guardada: %s\n", saved.ID)
+		}
+	}
 	for _, w := range job.Warnings {
 		fmt.Fprintln(stderr, "aviso:", w)
 	}

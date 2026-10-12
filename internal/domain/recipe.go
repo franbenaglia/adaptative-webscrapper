@@ -153,6 +153,11 @@ func (r Recipe) AllowsHost(host string) bool {
 	return false
 }
 
+// IsZero indica que todavía no hay receta.
+func (r Recipe) IsZero() bool {
+	return r.ItemLocator == "" && len(r.Fields) == 0
+}
+
 // HasPagination indica si la receta sabe pasar de página.
 func (r Recipe) HasPagination() bool {
 	return r.Pagination.Type == PaginationNextButton

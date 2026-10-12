@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Productos de demostración — rediseño</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .card { border: 1px solid #ccc; padding: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Catálogo</h1>
+  <!-- Mismos datos que productos.html con otro marcado: sirve para probar la reparación de recetas. -->
+  <section class="grid">
+    <div class="card">
+      <h3 class="card-title"><a href="/producto/1">Teclado mecánico</a></h3>
+      <p class="card-price">$ 45.999,90</p>
+      <p class="card-stock">En stock</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title"><a href="/producto/2">Mouse inalámbrico</a></h3>
+      <p class="card-price">$ 12.500,00</p>
+      <p class="card-stock">En stock</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title"><a href="/producto/3">Monitor 24 pulgadas</a></h3>
+      <p class="card-price">$ 189.000,00</p>
+      <p class="card-stock">Sin stock</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title"><a href="/producto/4">Auriculares</a></h3>
+      <p class="card-price">$ 30.250,50</p>
+      <p class="card-stock">En stock</p>
+    </div>
+  </section>
+</body>
+</html>

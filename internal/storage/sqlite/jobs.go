@@ -17,30 +17,30 @@ type JobRepository struct {
 }
 
 const jobColumns = `id, recipe_id, recipe, url, status, max_pages, max_records, headless,
-	pages_visited, record_count, warnings, error, created_at, started_at, finished_at`
+	pages_visited, record_count, warnings, error, created_at, started_at, finished_at, instruction, recipe_origin`
 
 func (r *JobRepository) Create(ctx context.Context, job domain.Job) error {
 	recipe, warnings, err := encodeJob(job)
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = r.db.ExecContext(ctx, `INSERT INTO jobs (`+jobColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.RecipeID, recipe, job.URL, string(job.Status), job.MaxPages, job.MaxRecords, job.Headless,
 		job.PagesVisited, job.RecordCount, warnings, job.Error, formatTime(job.CreatedAt),
-		formatTimePtr(job.StartedAt), formatTimePtr(job.FinishedAt))
+		formatTimePtr(job.StartedAt), formatTimePtr(job.FinishedAt), job.Instruction, job.RecipeOrigin)
 	return err
 }
 
 // Update guarda los campos que cambian durante la vida del trabajo.
 func (r *JobRepository) Update(ctx context.Context, job domain.Job) error {
-	_, warnings, err := encodeJob(job)
+	recipe, warnings, err := encodeJob(job)
 	if err != nil {
 		return err
 	}
 	res, err := r.db.ExecContext(ctx, `UPDATE jobs SET status = ?, pages_visited = ?, record_count = ?, warnings = ?,
-		error = ?, started_at = ?, finished_at = ? WHERE id = ?`,
+		error = ?, started_at = ?, finished_at = ?, recipe = ?, recipe_origin = ? WHERE id = ?`,
 		string(job.Status), job.PagesVisited, job.RecordCount, warnings, job.Error,
-		formatTimePtr(job.StartedAt), formatTimePtr(job.FinishedAt), job.ID)
+		formatTimePtr(job.StartedAt), formatTimePtr(job.FinishedAt), recipe, job.RecipeOrigin, job.ID)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,8 @@ func scanJob(row scanner) (domain.Job, error) {
 		startedAt, finishedAt sql.NullString
 	)
 	err := row.Scan(&job.ID, &job.RecipeID, &recipe, &job.URL, &status, &job.MaxPages, &job.MaxRecords, &job.Headless,
-		&job.PagesVisited, &job.RecordCount, &warnings, &job.Error, &createdAt, &startedAt, &finishedAt)
+		&job.PagesVisited, &job.RecordCount, &warnings, &job.Error, &createdAt, &startedAt, &finishedAt,
+		&job.Instruction, &job.RecipeOrigin)
 	if err != nil {
 		return job, err
 	}

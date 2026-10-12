@@ -30,7 +30,7 @@ func demoSetup(t *testing.T) (*application.Service, domain.Recipe, string) {
 
 	launcher := NewLauncher()
 	t.Cleanup(func() { _ = launcher.Close() })
-	return application.NewService(launcher), recipe, server.URL + "/productos.html"
+	return application.NewService(launcher, application.ServiceOptions{}), recipe, server.URL + "/productos.html"
 }
 
 func TestDemoSiteTwoPages(t *testing.T) {

@@ -36,18 +36,46 @@ type BrowserSession interface {
 	Extract(ctx context.Context, recipe domain.Recipe) ([]domain.RawRecord, error)
 	// GoToNextPage devuelve false cuando no hay página siguiente.
 	GoToNextPage(ctx context.Context, rule domain.PaginationRule) (bool, error)
+	// Snapshot resume la página actual en candidatos para el modelo.
+	Snapshot(ctx context.Context) (domain.PageSnapshot, error)
+	// BlockReason describe por qué la página impide el acceso (login,
+	// CAPTCHA, verificación humana) o devuelve "" si no lo impide.
+	BlockReason(ctx context.Context) (string, error)
 	Close() error
 }
 
-// Event es una notificación de progreso del motor. Type es uno de
-// domain.EventPageOpened o domain.EventRecordsExtracted.
+// IntelligenceProvider propone recetas a partir de un PageSnapshot. Su
+// resultado es entrada no confiable: el motor lo valida y lo prueba.
+type IntelligenceProvider interface {
+	DiscoverRecipe(ctx context.Context, snapshot domain.PageSnapshot, instruction string) (domain.Recipe, error)
+	// RepairRecipe debe conservar los nombres y tipos de campo de previous.
+	RepairRecipe(ctx context.Context, previous domain.Recipe, snapshot domain.PageSnapshot, failure domain.ExtractionFailure) (domain.Recipe, error)
+}
+
+// AIStatus describe el estado del proveedor de IA para mostrarlo al usuario.
+type AIStatus struct {
+	Enabled         bool     `json:"enabled"`
+	Provider        string   `json:"provider,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Reachable       bool     `json:"reachable"`
+	ModelInstalled  bool     `json:"model_installed"`
+	InstalledModels []string `json:"installed_models"`
+	Message         string   `json:"message,omitempty"`
+}
+
+// Event es una notificación de progreso del motor. Type es uno de los
+// domain.Event* de página, registros o receta.
 type Event struct {
 	Type    string
 	Page    int
 	URL     string
 	Records int // total acumulado
+	Message string
 	// NewRecords son los registros añadidos en esta página (solo en records.extracted).
 	NewRecords []domain.Record
+	// Recipe y RecipeOrigin acompañan a recipe.discovered y recipe.validated.
+	Recipe       *domain.Recipe
+	RecipeOrigin string
 }
 
 // ProgressSink recibe eventos de progreso de forma síncrona, en orden.

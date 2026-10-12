@@ -10,7 +10,7 @@ empaquetado y endurecimiento.
 
 ## Fase actual
 
-**Fase 4 — IA adaptable**, sin empezar. Requiere instalar Ollama y elegir modelo (ver "Siguiente paso").
+**Fase 4 — IA adaptable**, en curso.
 
 ## Hecho
 
@@ -27,7 +27,12 @@ empaquetado y endurecimiento.
 
 ## En curso
 
-Nada.
+- Fase 4. Hecho y en commit: snapshot con candidatos (`internal/browser/snapshot.go`), proveedor
+  (`internal/intelligence`), flujo descubrir/reparar en `application.Service`, detección de bloqueo,
+  `instruction` en dominio, API y CLI, migración `0002_ai.sql`, páginas de demostración nuevas.
+- Falta: campo de instrucción y estado de la IA en `web/`; instalar Ollama en `~/sdk` (decisión del
+  usuario: sin Docker, modelo pequeño y configurable), probar con un modelo real y fijar
+  `config.DefaultOllamaModel`; documentación (README, D-016 en adelante) y cierre de fase.
 
 ## Siguiente paso
 

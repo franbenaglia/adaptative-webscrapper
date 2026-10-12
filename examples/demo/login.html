@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Iniciar sesión</title>
+  <style>body { font-family: sans-serif; margin: 2rem; } label { display: block; margin: 0.6rem 0; }</style>
+</head>
+<body>
+  <h1>Iniciar sesión</h1>
+  <p>Debes identificarte para ver el catálogo.</p>
+  <!-- Formulario de adorno: no envía nada. Simula una página que exige autenticación. -->
+  <form onsubmit="return false">
+    <label>Usuario <input type="text" name="usuario"></label>
+    <label>Contraseña <input type="password" name="clave"></label>
+    <button type="submit">Entrar</button>
+  </form>
+</body>
+</html>

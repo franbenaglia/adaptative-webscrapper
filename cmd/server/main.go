@@ -64,6 +64,7 @@ func run(logger *slog.Logger) error {
 	}
 	handler := (&api.Server{
 		Jobs: app.Jobs, Recipes: app.Recipes, Queue: queue, Logger: logger, DefaultHeadless: cfg.Headless, WebDir: webDir,
+		AIStatus: app.AIStatus,
 	}).Handler()
 	// Sin WriteTimeout: las respuestas SSE duran lo que dura el trabajo.
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
@@ -71,7 +72,7 @@ func run(logger *slog.Logger) error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()
 	logger.Info("servidor iniciado", "addr", cfg.HTTPAddr, "database", cfg.DatabasePath,
-		"max_concurrent_jobs", cfg.MaxConcurrentJobs, "requeued", len(pending))
+		"max_concurrent_jobs", cfg.MaxConcurrentJobs, "requeued", len(pending), "ai_enabled", cfg.AIEnabled, "model", cfg.OllamaModel)
 
 	select {
 	case err := <-serveErr:

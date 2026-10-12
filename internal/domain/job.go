@@ -53,11 +53,14 @@ func (s JobStatus) CanTransitionTo(to JobStatus) bool {
 }
 
 // Job es una ejecución registrada. Recipe es una copia de la receta usada,
-// para que el historial no dependa de cambios posteriores.
+// para que el historial no dependa de cambios posteriores; está vacía
+// mientras un trabajo con Instruction no haya descubierto la suya.
 type Job struct {
 	ID           string     `json:"id"`
 	RecipeID     string     `json:"recipe_id,omitempty"`
+	Instruction  string     `json:"instruction,omitempty"`
 	Recipe       Recipe     `json:"recipe"`
+	RecipeOrigin string     `json:"recipe_origin,omitempty"`
 	URL          string     `json:"url"`
 	Status       JobStatus  `json:"status"`
 	MaxPages     int        `json:"max_pages"`
@@ -89,8 +92,12 @@ func (j *Job) Transition(to JobStatus, now time.Time) error {
 
 // Request reconstruye la solicitud de extracción del trabajo.
 func (j Job) Request() ScrapeRequest {
-	recipe := j.Recipe
-	return ScrapeRequest{URL: j.URL, Recipe: &recipe, MaxPages: j.MaxPages, MaxRecords: j.MaxRecords, Headless: j.Headless}
+	request := ScrapeRequest{URL: j.URL, Instruction: j.Instruction, MaxPages: j.MaxPages, MaxRecords: j.MaxRecords, Headless: j.Headless}
+	if !j.Recipe.IsZero() {
+		recipe := j.Recipe
+		request.Recipe = &recipe
+	}
+	return request
 }
 
 // Tipos de evento de un trabajo; son también los nombres de evento de SSE.
@@ -98,6 +105,9 @@ const (
 	EventJobStarted       = "job.started"
 	EventPageOpened       = "page.opened"
 	EventRecordsExtracted = "records.extracted"
+	EventRecipeDiscovered = "recipe.discovered"
+	EventRecipeValidated  = "recipe.validated"
+	EventRecipeRepairing  = "recipe.repairing"
 	EventJobCompleted     = "job.completed"
 	EventJobFailed        = "job.failed"
 	EventJobBlocked       = "job.blocked"

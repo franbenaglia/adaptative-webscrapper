@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,8 @@ type Server struct {
 	Queue           application.JobQueue
 	Logger          *slog.Logger
 	DefaultHeadless bool
+	// AIStatus informa del proveedor de IA; nil equivale a IA desactivada.
+	AIStatus func(ctx context.Context) application.AIStatus
 	// WebDir es el directorio con la interfaz web ya compilada; vacío la desactiva.
 	WebDir string
 }
@@ -42,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/v1/health", s.health)
+	mux.HandleFunc("GET /api/v1/ai", s.aiStatus)
 
 	mux.HandleFunc("POST /api/v1/jobs", s.createJob)
 	mux.HandleFunc("GET /api/v1/jobs", s.listJobs)
@@ -68,6 +72,14 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) aiStatus(w http.ResponseWriter, r *http.Request) {
+	status := application.AIStatus{InstalledModels: []string{}}
+	if s.AIStatus != nil {
+		status = s.AIStatus(r.Context())
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 // writeError traduce los errores del dominio a códigos HTTP.

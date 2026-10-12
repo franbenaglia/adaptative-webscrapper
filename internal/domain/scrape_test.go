@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -73,9 +74,38 @@ func TestScrapeRequestNormalize(t *testing.T) {
 		}
 	}
 
+	discover, err := ScrapeRequest{URL: "https://shop.example/list", Instruction: "  extraer nombres  "}.Normalize()
+	if err != nil || discover.Recipe != nil || discover.Instruction != "extraer nombres" || discover.MaxPages != DefaultMaxPages {
+		t.Errorf("solicitud de descubrimiento = %+v, %v", discover, err)
+	}
+
 	bad := recipe
 	bad.Fields = nil
 	if _, err := (ScrapeRequest{Recipe: &bad}).Normalize(); !errors.Is(err, ErrInvalidRecipe) {
 		t.Errorf("se esperaba ErrInvalidRecipe, se obtuvo %v", err)
+	}
+}
+
+func TestAssessExtraction(t *testing.T) {
+	fields := []FieldDefinition{
+		{Name: "name", Type: FieldText, Required: true},
+		{Name: "price", Type: FieldNumber, Required: true},
+		{Name: "note", Type: FieldText},
+	}
+	ok := []RawRecord{{"name": "A", "price": "1"}, {"name": "B", "price": "2"}, {"name": "C"}}
+	if failure := AssessExtraction(fields, ok, "https://x.example/"); failure != nil {
+		t.Errorf("un campo requerido ausente en una minoría no es un fallo: %v", failure)
+	}
+
+	empty := AssessExtraction(fields, nil, "https://x.example/")
+	if empty == nil || empty.Items != 0 || !strings.Contains(empty.Error(), "ningún elemento") {
+		t.Errorf("sin elementos = %v", empty)
+	}
+
+	broken := []RawRecord{{"name": "A", "price": "consultar"}, {"name": "B"}, {"name": "C", "price": "3"}}
+	failure := AssessExtraction(fields, broken, "https://x.example/")
+	if failure == nil || failure.Missing["price"] != 2 || len(failure.Missing) != 1 ||
+		!strings.Contains(failure.Error(), `"price" falta en 2 de 3`) {
+		t.Errorf("campo requerido roto = %v", failure)
 	}
 }

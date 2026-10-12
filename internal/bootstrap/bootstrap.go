@@ -11,6 +11,7 @@ import (
 	"adaptive-scraper/internal/application"
 	"adaptive-scraper/internal/browser"
 	"adaptive-scraper/internal/config"
+	"adaptive-scraper/internal/intelligence"
 	"adaptive-scraper/internal/storage/sqlite"
 )
 
@@ -19,24 +20,38 @@ type App struct {
 	Config  config.Config
 	Jobs    *application.JobService
 	Recipes *application.RecipeService
+	// AIStatus informa del proveedor de IA configurado.
+	AIStatus func(ctx context.Context) application.AIStatus
 
 	store    *sqlite.Store
 	launcher *browser.Launcher
 }
 
 // Open abre la base de datos y construye los servicios. El navegador no se
-// inicia hasta el primer trabajo.
+// inicia hasta el primer trabajo y el modelo no se contacta hasta que hace falta.
 func Open(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, error) {
 	store, err := sqlite.Open(ctx, cfg.DatabasePath)
 	if err != nil {
 		return nil, err
 	}
 	launcher := browser.NewLauncher()
+
+	engineOptions := application.ServiceOptions{MaxRepairs: cfg.AIMaxRepairs}
+	aiStatus := func(context.Context) application.AIStatus {
+		return application.AIStatus{InstalledModels: []string{}, Message: "La IA está desactivada. Actívala con AI_ENABLED=true."}
+	}
+	if cfg.AIEnabled {
+		ollama := intelligence.NewOllama(cfg.OllamaBaseURL, cfg.OllamaModel, cfg.AITimeout)
+		engineOptions.Intelligence = intelligence.NewProvider(ollama)
+		aiStatus = ollama.Status
+	}
+
 	return &App{
 		Config: cfg,
-		Jobs: application.NewJobService(application.NewService(launcher), store.Jobs(), store.Recipes(),
-			application.JobOptions{Logger: logger, Timeout: cfg.JobTimeout}),
+		Jobs: application.NewJobService(application.NewService(launcher, engineOptions), store.Jobs(), store.Recipes(),
+			application.JobOptions{Logger: logger, Timeout: cfg.JobTimeout, AIEnabled: cfg.AIEnabled}),
 		Recipes:  application.NewRecipeService(store.Recipes()),
+		AIStatus: aiStatus,
 		store:    store,
 		launcher: launcher,
 	}, nil

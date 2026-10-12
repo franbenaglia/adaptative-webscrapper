@@ -34,10 +34,16 @@ type fakeEngine struct {
 	records  []domain.Record
 	result   domain.ScrapeResult
 	err      error
+	// discovered, si no es nil, simula que el modelo descubre esa receta.
+	discovered *domain.Recipe
 }
 
 func (f *fakeEngine) Run(_ context.Context, request domain.ScrapeRequest, sink application.ProgressSink) (domain.ScrapeResult, error) {
 	f.requests = append(f.requests, request)
+	if f.discovered != nil {
+		sink.Emit(application.Event{Type: domain.EventRecipeDiscovered, Page: 1, Recipe: f.discovered, RecipeOrigin: domain.RecipeDiscovered, Message: "2 campos"})
+		f.result.Recipe, f.result.RecipeOrigin = f.discovered, domain.RecipeDiscovered
+	}
 	if len(f.records) > 0 {
 		sink.Emit(application.Event{Type: domain.EventPageOpened, Page: 1, URL: request.URL})
 		sink.Emit(application.Event{Type: domain.EventRecordsExtracted, Page: 1, URL: request.URL, Records: len(f.records), NewRecords: f.records})
@@ -70,8 +76,11 @@ func (h *harness) run(args ...string) (stdout, stderr string, err error) {
 				return Services{}, nil, err
 			}
 			return Services{
-				Jobs:    application.NewJobService(h.engine, store.Jobs(), store.Recipes(), application.JobOptions{}),
+				Jobs:    application.NewJobService(h.engine, store.Jobs(), store.Recipes(), application.JobOptions{AIEnabled: true}),
 				Recipes: application.NewRecipeService(store.Recipes()),
+				AIStatus: func(context.Context) application.AIStatus {
+					return application.AIStatus{Enabled: true, Provider: "ollama", Model: "mini", InstalledModels: []string{}}
+				},
 			}, func() { _ = store.Close() }, nil
 		},
 	})
@@ -179,6 +188,8 @@ func TestScrapeRejectsBadInputBeforeRunning(t *testing.T) {
 	valid := writeRecipe(t, recipeJSON)
 	cases := map[string][]string{
 		"sin receta":          {"scrape"},
+		"instrucción sin URL": {"scrape", "--instruction", "nombres"},
+		"URL sin instrucción": {"scrape", "--url", "https://shop.example/"},
 		"receta e id":         {"scrape", "--recipe", valid, "--recipe-id", "x"},
 		"archivo inexistente": {"scrape", "--recipe", "/no/existe.json"},
 		"campo desconocido":   {"scrape", "--recipe", writeRecipe(t, `{"name":"x","code":"alert(1)"}`)},
@@ -257,5 +268,43 @@ func TestVersionDoesNotOpenServices(t *testing.T) {
 	h := newHarness(t, &fakeEngine{})
 	if stdout, _, err := h.run("version"); err != nil || stdout != "test\n" || h.opened != 0 {
 		t.Errorf("stdout = %q err = %v aperturas = %d", stdout, err, h.opened)
+	}
+}
+
+func TestScrapeFromInstructionCanSaveDiscoveredRecipe(t *testing.T) {
+	var discovered domain.Recipe
+	if err := json.Unmarshal([]byte(recipeJSON), &discovered); err != nil {
+		t.Fatal(err)
+	}
+	engine := &fakeEngine{discovered: &discovered, records: []domain.Record{{"name": "A", "price": 1.5}}}
+	h := newHarness(t, engine)
+
+	stdout, stderr, err := h.run("scrape", "--url", "https://shop.example/products", "--instruction", "nombre y precio",
+		"--format", "csv", "--save-recipe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req := engine.requests[0]; req.Recipe != nil || req.Instruction != "nombre y precio" || req.URL != "https://shop.example/products" {
+		t.Errorf("solicitud = %+v", req)
+	}
+	// Las columnas salen de la receta descubierta.
+	if stdout != "name,price\nA,1.5\n" {
+		t.Errorf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "receta descubierta por el modelo (2 campos)") || !strings.Contains(stderr, "receta guardada: ") {
+		t.Errorf("stderr = %q", stderr)
+	}
+	list, _, _ := h.run("recipes", "list", "--json")
+	var saved []domain.Recipe
+	if json.Unmarshal([]byte(list), &saved) != nil || len(saved) != 1 || saved[0].ItemLocator != ".product" {
+		t.Errorf("recetas guardadas = %s", list)
+	}
+}
+
+func TestAIStatusCommand(t *testing.T) {
+	h := newHarness(t, &fakeEngine{})
+	stdout, _, err := h.run("ai", "status")
+	if err != nil || !strings.Contains(stdout, `"model": "mini"`) || !strings.Contains(stdout, `"enabled": true`) {
+		t.Errorf("stdout = %q, err = %v", stdout, err)
 	}
 }

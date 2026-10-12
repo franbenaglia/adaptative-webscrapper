@@ -113,8 +113,20 @@ type session struct {
 }
 
 func (s *session) Navigate(ctx context.Context, rawURL string) error {
-	_, err := s.page.Goto(rawURL, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateLoad})
-	return ctxErr(ctx, err)
+	response, err := s.page.Goto(rawURL, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateLoad})
+	if err != nil {
+		return ctxErr(ctx, err)
+	}
+	if response == nil {
+		return nil
+	}
+	switch status := response.Status(); {
+	case status == 401 || status == 403 || status == 429:
+		return fmt.Errorf("%w: el servidor respondió %d", domain.ErrBlocked, status)
+	case status >= 400:
+		return fmt.Errorf("el servidor respondió %d", status)
+	}
+	return nil
 }
 
 func (s *session) URL() string { return s.page.URL() }
