@@ -20,6 +20,7 @@ type Config struct {
 	MaxConcurrentJobs int           // APP_MAX_CONCURRENT_JOBS
 	JobTimeout        time.Duration // APP_JOB_TIMEOUT
 	Headless          bool          // PLAYWRIGHT_HEADLESS
+	WebDir            string        // APP_WEB_DIR
 }
 
 // Load lee la configuración del entorno y de ./.env si existe.
@@ -47,6 +48,7 @@ func load(lookupEnv func(string) (string, bool), envFile string) (Config, error)
 		// Solo loopback por defecto: la API no tiene autenticación.
 		HTTPAddr: get("APP_HTTP_ADDR", "127.0.0.1:8080"),
 		DataDir:  get("APP_DATA_DIR", "data"),
+		WebDir:   get("APP_WEB_DIR", filepath.Join("web", "dist")),
 	}
 	cfg.DatabasePath = get("APP_DATABASE_PATH", filepath.Join(cfg.DataDir, "adaptive-scraper.db"))
 

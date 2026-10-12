@@ -33,6 +33,8 @@ type Server struct {
 	Queue           application.JobQueue
 	Logger          *slog.Logger
 	DefaultHeadless bool
+	// WebDir es el directorio con la interfaz web ya compilada; vacío la desactiva.
+	WebDir string
 }
 
 // Handler devuelve el enrutador completo de la API.
@@ -55,6 +57,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/recipes/{id}", s.updateRecipe)
 	mux.HandleFunc("DELETE /api/v1/recipes/{id}", s.deleteRecipe)
 	mux.HandleFunc("POST /api/v1/recipes/{id}/run", s.runRecipe)
+
+	// La interfaz se sirve desde el mismo origen que la API (sin CORS).
+	if s.WebDir != "" {
+		mux.Handle("GET /", http.FileServer(http.Dir(s.WebDir)))
+	}
 
 	return s.recoverPanics(s.logRequests(requireJSONBody(mux)))
 }

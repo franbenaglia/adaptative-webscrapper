@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -56,8 +57,13 @@ func run(logger *slog.Logger) error {
 	}
 	queue.Start(ctx)
 
+	webDir := cfg.WebDir
+	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err != nil {
+		logger.Warn("interfaz web no disponible: ejecute `make web-build`", "dir", webDir)
+		webDir = ""
+	}
 	handler := (&api.Server{
-		Jobs: app.Jobs, Recipes: app.Recipes, Queue: queue, Logger: logger, DefaultHeadless: cfg.Headless,
+		Jobs: app.Jobs, Recipes: app.Recipes, Queue: queue, Logger: logger, DefaultHeadless: cfg.Headless, WebDir: webDir,
 	}).Handler()
 	// Sin WriteTimeout: las respuestas SSE duran lo que dura el trabajo.
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}

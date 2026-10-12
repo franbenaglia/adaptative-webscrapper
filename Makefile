@@ -1,4 +1,4 @@
-.PHONY: build test test-browser fmt vet check install-browsers demo-site demo server
+.PHONY: build test test-browser fmt vet check install-browsers demo-site demo server web-install web-build web-dev web-check
 
 VERSION ?= dev
 
@@ -39,3 +39,18 @@ server:
 # Requiere `make demo-site` en otra terminal.
 demo: build
 	bin/adaptive-scraper scrape --recipe examples/recipes/productos-demo.json --output bin/productos.csv
+
+# Interfaz web (requiere Node.js 20.19 o posterior).
+web-install:
+	cd web && npm install
+
+# Genera web/dist, que el servidor publica en la raíz.
+web-build:
+	cd web && npm run build
+
+# Servidor de desarrollo de Vite con recarga; necesita `make server` en otra terminal.
+web-dev:
+	cd web && npm run dev
+
+web-check:
+	cd web && npm run check

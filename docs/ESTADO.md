@@ -4,26 +4,26 @@
 
 ## Resumen
 
-Fases 1 y 2 terminadas y verificadas. Hay motor determinista con Playwright, CLI, persistencia SQLite,
-cola de trabajos y API HTTP con SSE. No hay todavía interfaz web ni IA.
+Fases 1, 2 y 3 terminadas y verificadas. Hay motor determinista con Playwright, CLI, persistencia SQLite,
+cola de trabajos, API HTTP con SSE e interfaz web. Falta la IA (descubrir y reparar recetas) y el
+empaquetado y endurecimiento.
 
 ## Fase actual
 
-**Fase 3 — Interfaz web**, sin empezar.
+**Fase 4 — IA adaptable**, sin empezar. Requiere instalar Ollama y elegir modelo (ver "Siguiente paso").
 
 ## Hecho
 
 - Fase 0: especificación evaluada, documentación de continuidad, Go 1.27.2 instalado, git inicializado.
 - Fase 1 (2026-10-12): dominio, motor, adaptador Playwright, exportadores, CLI, sitio de demostración.
-- Fase 2 (2026-10-12), verificada con `make check` (incluye `-race`), `make test-browser` y una ejecución
-  real: servidor + sitio de demostración, receta creada por API, trabajo lanzado con
-  `POST /recipes/{id}/run`, seis eventos por SSE, exportación CSV y el mismo historial visto desde la CLI.
-  - `internal/domain/job.go`: estados, transiciones, `Job`, `JobEvent`.
-  - `migrations/` e `internal/storage/sqlite`: esquema y repositorios.
-  - `internal/application`: `JobService`, `RecipeService`, `EventHub`, `Queue`.
-  - `internal/api`: API `/api/v1` con SSE; `cmd/server`.
-  - `internal/config`, `internal/bootstrap`, `.env.example`.
-  - CLI: `recipes list|show|import|run`, `jobs list|show`, `scrape --recipe-id`.
+- Fase 2 (2026-10-12): estados de trabajo, SQLite, `JobService`, cola, API `/api/v1` con SSE, `cmd/server`.
+- Fase 3 (2026-10-12), verificada con `make web-check`, `make check` y una sesión real en navegador contra
+  el servidor y el sitio de demostración: extracción con receta JSON, progreso en vivo, tabla de 6
+  registros, guardar receta, ejecutar receta guardada, error del servidor mostrado en el formulario,
+  editor de recetas con error de sintaxis y de validación, historial.
+  - `web/src/api.ts` (cliente tipado), `router.ts` (rutas por hash), `recipe.ts`, `ui.tsx`, `styles.css`.
+  - `web/src/views/`: `NewJob`, `JobDetail`, `Jobs`, `Recipes`, `RecipeEditor`.
+  - `internal/api`: sirve `APP_WEB_DIR` en la raíz; `Makefile`: `web-install`, `web-build`, `web-dev`, `web-check`.
 
 ## En curso
 
@@ -31,17 +31,27 @@ Nada.
 
 ## Siguiente paso
 
-Empezar la Fase 3 por este orden:
+Empezar la Fase 4. Antes hay dos decisiones del usuario:
 
-1. Crear `web/` con Vite + React + TypeScript (`npm create vite@latest web -- --template react-ts`) y un
-   proxy de desarrollo de `/api` hacia `127.0.0.1:8080` (ver D-013: sin CORS).
-2. Cliente tipado de la API (`internal/api` es la referencia; las formas JSON salen de las etiquetas de
-   `internal/domain`).
-3. Pantalla principal: URL, límites, headless, receta como JSON validado (la instrucción en lenguaje
-   natural llega en la Fase 4), inicio del trabajo, progreso con `EventSource` sobre
-   `/api/v1/jobs/{id}/events`, vista previa tabular, avisos y errores, botones de exportación.
-4. Vistas de historial de trabajos y de recetas (guardar, editar, ejecutar, borrar).
-5. Servir `web/dist` desde `cmd/server` (mismo origen) y añadir los comandos al `Makefile`.
+- Instalar Ollama (no está instalado; sin sudo se puede usar el binario en `~/.local` o la imagen Docker).
+- Elegir modelo: sin GPU y con 15 GB de RAM, uno pequeño (por ejemplo de 3–4 B de parámetros, unos 2–3 GB
+  en disco). Quedan ~19 GB libres.
+
+Después, por este orden:
+
+1. `PageSnapshot` en `internal/domain` y `Snapshot()` en `BrowserSession` (D-004): URL, título, texto visible
+   limitado y **candidatos numerados** de contenedores repetidos y de campos, calculados por un script fijo (P-3).
+2. Puerto `IntelligenceProvider` (`DiscoverRecipe`, `RepairRecipe`) con una implementación simulada para pruebas.
+3. Adaptador Ollama por HTTP con salida estructurada (P-4), decodificación estricta, límite de tamaño y
+   `Recipe.Validate()` sobre el resultado. Variables `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `AI_ENABLED`.
+4. Flujo en el motor: sin receta → snapshot → descubrir → validar → probar en la página; si la extracción
+   no supera la validación, reparar con un máximo configurable de intentos. Eventos `recipe.discovered`,
+   `recipe.validated`, `recipe.repairing`. Criterio de "receta rota" a partir de elementos encontrados y
+   campos requeridos ausentes.
+5. `Instruction` en `JobRequest`, en la API, en la CLI (`--instruction`) y en el formulario web.
+6. Guardar la receta descubierta o reparada como nueva versión (`recipe_versions` ya existe).
+7. Páginas de prueba que faltan en `examples/demo`: tabla, cambio de selector y login o bloqueo simulados;
+   y detección básica de login/CAPTCHA que emita `domain.ErrBlocked`.
 
 ## Pendientes conocidos
 
@@ -54,13 +64,15 @@ Empezar la Fase 3 por este orden:
 - Sin capturas ni trazas de Playwright al fallar, ni política de retención (Fase 5).
 - La CLI no tiene modo `--server`; un trabajo en curso solo se cancela desde el proceso que lo ejecuta (D-010).
 - No hay endpoint para consultar versiones anteriores de una receta (se guardan en `recipe_versions`).
+- La interfaz web no tiene pruebas automáticas (D-015) ni editor visual de selectores (fuera del MVP).
+- La interfaz no tiene campo de instrucción en lenguaje natural hasta la Fase 4.
 
 ## Entorno de desarrollo (comprobado el 2026-10-12)
 
 | Herramienta | Estado |
 |---|---|
 | Go | 1.27.2 en `~/sdk/go1.27.2`, enlazado desde `~/.local/bin/go` y `gofmt` (ya en el PATH). Instalado sin sudo; para actualizar, extraer otra versión en `~/sdk` y reapuntar los enlaces. |
-| Node.js | v20.20.2 |
+| Node.js | v20.20.2 (suficiente para Vite 8, que pide 20.19 o posterior). `web/node_modules` ocupa 74 MB. |
 | Docker / Compose | Instalados (Compose v5.5.1) |
 | curl | Es el de snap (`/snap/bin/curl`): no puede escribir en `/tmp` con `-o`; usar redirección `>` del shell. |
 | git, make, gcc | Instalados |
@@ -73,7 +85,7 @@ Empezar la Fase 3 por este orden:
 
 - [x] Fase 1 — Base funcional: módulo Go, dominio, interfaces, CLI mínima, extracción determinista con receta manual, export JSON/CSV, pruebas.
 - [x] Fase 2 — Persistencia y servidor: SQLite, migraciones, API HTTP, cola, cancelación, SSE, historial.
-- [ ] Fase 3 — Interfaz web: formulario, progreso, vista previa, historial, recetas, exportaciones.
+- [x] Fase 3 — Interfaz web: formulario, progreso, vista previa, historial, recetas, exportaciones.
 - [ ] Fase 4 — IA adaptable: adaptador Ollama, snapshots, descubrimiento, validación, reparación, versiones.
 - [ ] Fase 5 — Empaquetado y endurecimiento: Docker, SSRF completo, timeouts, trazas, documentación.
 

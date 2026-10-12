@@ -44,5 +44,7 @@ El objetivo es que cualquier agente pueda retomar el trabajo solo con el reposit
 - `make demo-site` y, en otra terminal, `make demo` — ejecución completa contra el sitio local.
 - `make install-browsers` — instala el driver de Playwright y Chromium (una vez por versión).
 - `make fmt` — aplica `gofmt`.
+- `make web-install` (una vez), `make web-check` (tipos + compilación) y `make web-build` (genera `web/dist`,
+  que `make server` publica en la raíz). `make web-dev` arranca Vite con proxy hacia el servidor.
 
 El módulo Go se llama `adaptive-scraper`; Go está en `~/.local/bin/go`.

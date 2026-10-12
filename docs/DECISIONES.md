@@ -122,6 +122,18 @@ Formato: `D-NNN — título`, fecha, estado (propuesta / aceptada / sustituida),
   en `scrape`, variable `APP_JOB_TIMEOUT` (duración máxima de un trabajo, 10 min por defecto) y evento
   `job.cancelled`.
 
+### D-015 — Interfaz web sin librerías de UI ni router, servida desde disco
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: `web/` usa solo React, TypeScript y Vite. Rutas por hash (`#/jobs/<id>`), CSS propio con tema
+  claro y oscuro, cliente tipado en `web/src/api.ts`. `cmd/server` publica `APP_WEB_DIR` (por defecto
+  `web/dist`) en la raíz si contiene `index.html`; si no, arranca solo con la API y lo avisa en el log.
+- Consecuencias: el binario no incrusta la interfaz, así que `go build` no depende de Node.js; la imagen
+  Docker de la Fase 5 deberá copiar `web/dist`. En desarrollo, Vite hace de proxy de `/api` (D-013).
+  La receta se edita como JSON: el cliente solo comprueba la sintaxis y el servidor valida las reglas.
+- Sin pruebas automáticas de frontend por ahora: `npm run check` (tipos + compilación) y verificación manual
+  en navegador. Si la interfaz crece, añadir Vitest.
+
 ## Propuestas pendientes de confirmar (aún no son decisiones)
 
 Surgen de la evaluación de factibilidad del 2026-10-12. Conviértelas en entradas `D-NNN` al adoptarlas.

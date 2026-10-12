@@ -20,7 +20,7 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	want := Config{
 		HTTPAddr: "127.0.0.1:8080", DataDir: "data", DatabasePath: filepath.Join("data", "adaptive-scraper.db"),
-		MaxConcurrentJobs: 2, JobTimeout: 10 * time.Minute, Headless: true,
+		MaxConcurrentJobs: 2, JobTimeout: 10 * time.Minute, Headless: true, WebDir: filepath.Join("web", "dist"),
 	}
 	if cfg != want {
 		t.Errorf("config = %+v", cfg)

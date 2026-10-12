@@ -4,14 +4,15 @@ Extracción web local basada en recetas declarativas. Una receta describe qué e
 página, qué campos tiene cada uno y cómo pasar a la página siguiente; el motor la ejecuta con Playwright de
 forma determinista. En fases posteriores un modelo local (Ollama) descubrirá y reparará las recetas.
 
-**Estado: Fase 2 de 5.** Hay CLI y API HTTP con recetas escritas a mano e historial en SQLite. Aún no
-hay interfaz web ni IA.
+**Estado: Fase 3 de 5.** Hay interfaz web, CLI y API HTTP con recetas escritas a mano e historial en
+SQLite. Aún no hay IA.
 El avance detallado está en [docs/ESTADO.md](docs/ESTADO.md) y las decisiones en
 [docs/DECISIONES.md](docs/DECISIONES.md).
 
 ## Requisitos
 
 - Go 1.27 o posterior y `make`.
+- Node.js 20.19 o posterior, solo para compilar la interfaz web.
 - Conexión a Internet solo para la instalación inicial (dependencias, driver de Playwright y Chromium).
 
 ## Instalación
@@ -19,7 +20,22 @@ El avance detallado está en [docs/ESTADO.md](docs/ESTADO.md) y las decisiones e
 ```bash
 make install-browsers   # una vez: driver de Playwright y Chromium headless
 make build              # genera bin/adaptive-scraper, bin/adaptive-scraper-server y bin/demosite
+make web-install        # una vez: dependencias de la interfaz web
+make web-build          # genera web/dist
 ```
+
+## Interfaz web
+
+```bash
+make server             # abre http://127.0.0.1:8080
+```
+
+- **Nueva extracción**: elige una receta guardada o pega una en JSON, ajusta URL, límites y modo headless.
+- **Trabajo**: progreso en vivo, avisos, vista previa de registros, exportación a CSV y JSON, cancelar,
+  volver a ejecutar y guardar la receta usada.
+- **Trabajos** y **Recetas**: historial y gestión de recetas (crear, editar, ejecutar, borrar).
+
+Para desarrollar la interfaz con recarga automática: `make server` en una terminal y `make web-dev` en otra.
 
 ## Prueba rápida con el sitio de demostración
 
@@ -112,6 +128,7 @@ Variables de entorno o archivo `.env` (ver [.env.example](.env.example)):
 | `APP_MAX_CONCURRENT_JOBS` | `2` | Navegadores simultáneos en el servidor. |
 | `APP_JOB_TIMEOUT` | `10m` | Duración máxima de un trabajo. |
 | `PLAYWRIGHT_HEADLESS` | `true` | Navegador sin ventana. |
+| `APP_WEB_DIR` | `web/dist` | Interfaz web compilada. |
 
 ## Formato de una receta
 
@@ -141,6 +158,7 @@ Variables de entorno o archivo `.env` (ver [.env.example](.env.example)):
 ```bash
 make check          # vet, pruebas con -race y formato; no necesita navegador ni Internet
 make test-browser   # pruebas de integración con Chromium contra un servidor local
+make web-check      # tipos y compilación de la interfaz web
 ```
 
 ## Uso responsable

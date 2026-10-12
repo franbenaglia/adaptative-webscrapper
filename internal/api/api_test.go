@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -469,5 +470,29 @@ func TestPostRequiresJSONContentType(t *testing.T) {
 	var list struct{ Jobs []domain.Job }
 	if s.do("GET", "/api/v1/jobs", "", &list); len(list.Jobs) != 0 {
 		t.Errorf("no debe crearse ningún trabajo: %d", len(list.Jobs))
+	}
+}
+
+func TestServesWebInterfaceWhenConfigured(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<title>AdaptiveScraper</title>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer((&api.Server{Logger: slog.New(slog.DiscardHandler), WebDir: dir}).Handler())
+	defer server.Close()
+
+	for path, want := range map[string]int{"/": 200, "/no-existe.js": 404, "/healthz": 200} {
+		resp, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("%s = %d; se esperaba %d", path, resp.StatusCode, want)
+		}
+		if path == "/" && !strings.Contains(string(body), "AdaptiveScraper") {
+			t.Errorf("/ no sirve index.html: %s", body)
+		}
 	}
 }
