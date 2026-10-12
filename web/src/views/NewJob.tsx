@@ -127,8 +127,8 @@ export function NewJob({ recipeId }: { recipeId?: string }) {
               <small className="hint">Comprobando el modelo…</small>
             ) : aiReady ? (
               <small className="hint">
-                El modelo {ai.model} propondrá una receta para esta página. Sin GPU puede tardar un minuto o más.
-                Después podrás guardarla y reutilizarla sin IA.
+                El modelo {ai.model} propondrá una receta para esta página; sin GPU tarda del orden de medio
+                minuto. Después podrás guardarla y reutilizarla sin IA.
               </small>
             ) : (
               <small className="hint hint-error">

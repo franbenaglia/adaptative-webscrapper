@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Valores por defecto y topes de una ejecución.
@@ -167,6 +168,25 @@ func ParseNumber(s string) (float64, bool) {
 	}
 	n, err := strconv.ParseFloat(m, 64)
 	return n, err == nil
+}
+
+// LooksNumeric indica si un texto es esencialmente un número, con o sin
+// símbolo o unidad ("$ 1.234,50", "12 kg"). ParseNumber es más permisivo:
+// también saca un número de "/producto/1", que no lo es.
+func LooksNumeric(s string) bool {
+	if _, ok := ParseNumber(s); !ok {
+		return false
+	}
+	digits, letters := 0, 0
+	for _, r := range s {
+		switch {
+		case unicode.IsDigit(r):
+			digits++
+		case unicode.IsLetter(r):
+			letters++
+		}
+	}
+	return letters <= digits
 }
 
 func normalizeSingleSeparator(m, sep string) string {

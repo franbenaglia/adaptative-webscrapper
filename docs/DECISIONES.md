@@ -186,6 +186,31 @@ Formato: `D-NNN — título`, fecha, estado (propuesta / aceptada / sustituida),
   tabla, reparar tras un rediseño) con el modelo configurado: es la forma de evaluar un modelo antes de adoptarlo.
 - Consecuencias: el modelo es global al proceso, no se elige por trabajo.
 
+### D-020 — El tipo de un campo sale de los datos del candidato, no del modelo
+
+- Fecha: 2026-10-12. Estado: aceptada. Corrige un fallo real visto con `llama3.2:3b`.
+- Contexto: al reparar una receta, el modelo asignó al campo `precio` (number) el candidato del enlace.
+  `ParseNumber` saca el 1 de `/producto/1`, la extracción "funcionaba" y la reparación se aceptó y se guardó
+  con precios 1, 2, 3, 4.
+- Decisión: `intelligence.candidateType` clasifica cada candidato como `url` (atributo `href` o `src`),
+  `number` (todas sus muestras cumplen `domain.LooksNumeric`) o `text`. El prompt muestra esa clase junto a
+  cada candidato. Al descubrir, el tipo del campo es el del candidato; al reparar, el candidato debe ser
+  del mismo tipo que el campo original o la propuesta se rechaza.
+- Consecuencias: una reparación acierta o falla, pero no acepta un dato de otro tipo. Sigue sin poder
+  detectarse que el modelo cruce dos campos del mismo tipo (por ejemplo nombre y disponibilidad): por eso
+  la reparación se avisa siempre y conviene revisar la vista previa.
+
+### D-021 — Modelo por defecto `llama3.2:3b`
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: `config.DefaultOllamaModel = "llama3.2:3b"` (2 GB). Temperatura 0, semilla fija y contexto de 8192.
+- Medido en este equipo (8 núcleos, sin GPU) con `make test-ai`, tres ejecuciones seguidas con las cuatro
+  pruebas en verde: cada consulta al modelo tarda entre 10 y 18 segundos; una receta ya guardada se ejecuta
+  en menos de un segundo. No se han evaluado otros modelos ni sitios reales.
+- Observado durante el ajuste del prompt: el modelo es sensible a la redacción (con otra versión del
+  prompt nombró los campos en inglés y añadió una columna no pedida). Cualquier cambio en
+  `internal/intelligence/provider.go` debe ir seguido de varias pasadas de `make test-ai`.
+
 ## Propuestas pendientes de confirmar (aún no son decisiones)
 
 - **P-5 — SSRF aplicado en el navegador**, interceptando todas las peticiones (`Route`) y validando host e IP
@@ -194,9 +219,9 @@ Formato: `D-NNN — título`, fecha, estado (propuesta / aceptada / sustituida),
 
 ## Riesgos abiertos
 
-- **R-1 — Calidad y velocidad del modelo local (riesgo principal).** Sin GPU y con 15 GB de RAM solo caben
-  modelos pequeños en CPU: lentos y poco fiables generando selectores. Mitigaciones: P-3, P-4, reparación
-  acotada, y mantener `IntelligenceProvider` intercambiable por un proveedor remoto. Las Fases 1–3 no dependen de esto.
+- **R-1 — Calidad del modelo local.** Con `llama3.2:3b` el recorrido de demostración funciona y tarda
+  10–18 s por consulta (D-021), mejor de lo temido. Sigue sin probarse en sitios reales, con páginas grandes
+  y marcado desordenado, donde lo esperable es que acierte menos. Mitigaciones en vigor: D-016, D-017, D-020.
 - **R-2 — `playwright-go` es un binding no oficial** que descarga su propio driver y exige versiones
   concretas de navegador. Mitigación: ya previsto por la especificación (adaptador detrás de interfaz,
   reemplazable por un worker Node.js).

@@ -392,6 +392,10 @@ bin/adaptive-scraper scrape \
 `--save-recipe` guarda la receta que proponga el modelo y muestra su identificador. A partir de ahí, usa
 `recipes run <id>`: es más rápido y no depende del modelo.
 
+Como referencia, en un equipo de 8 núcleos sin tarjeta gráfica el modelo por defecto tarda entre 10 y 20
+segundos en proponer una receta para las páginas de demostración; ejecutar después la receta guardada lleva
+menos de un segundo.
+
 En la interfaz web, elige **Describirlo (IA)** en Nueva extracción, escribe la instrucción y la URL. Cuando
 el trabajo termine, el botón **Guardar receta** conserva la receta descubierta.
 
@@ -399,7 +403,8 @@ Consejos para la instrucción:
 
 - Nombra los datos uno por uno: «nombre, precio y disponibilidad», no «toda la información».
 - Usa la URL de la página que muestra el listado, no la portada del sitio.
-- Revisa siempre la vista previa: el modelo puede confundir dos datos parecidos.
+- Revisa siempre la vista previa: el modelo puede confundir dos datos parecidos o añadir una columna que no
+  pediste. Si el resultado no es el esperado, cambia la redacción de la instrucción o edita la receta guardada.
 
 ### Qué hace la IA y qué no
 
@@ -410,6 +415,9 @@ Consejos para la instrucción:
   obligatorio en más de la mitad de ellos, el modelo vuelve a localizar los mismos campos. Si la extracción
   termina bien, la receta reparada se guarda como una versión nueva y el trabajo lo avisa.
 - **Solo interviene cuando hace falta.** Una receta que funciona se ejecuta sin consultar al modelo.
+- **No mezcla tipos de datos.** La aplicación comprueba que un precio sea un número y un enlace una
+  dirección, así que una reparación no puede poner un enlace donde iba un precio. Lo que no puede comprobar es
+  que dos textos estén cruzados (por ejemplo, nombre y disponibilidad).
 - **No ve lo que no se repite.** Solo encuentra datos que estén dentro de elementos repetidos al menos tres
   veces en la página. Para casos más raros, escribe la receta a mano.
 

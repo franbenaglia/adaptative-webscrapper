@@ -44,7 +44,8 @@ func (o *Ollama) Complete(ctx context.Context, system, user string, schema json.
 		"stream":   false,
 		"format":   schema,
 		"messages": []chatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}},
-		"options":  map[string]any{"temperature": 0, "num_ctx": contextTokens},
+		// Temperatura 0 y semilla fija: la misma página y petición dan la misma receta.
+		"options": map[string]any{"temperature": 0, "seed": 1, "num_ctx": contextTokens},
 	})
 	if err != nil {
 		return "", err

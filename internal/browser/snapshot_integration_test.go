@@ -160,12 +160,12 @@ func TestNavigateReportsHTTPErrors(t *testing.T) {
 // contenido de sus muestras. Permite probar todo el recorrido sin Ollama.
 type keywordLLM struct{ calls int }
 
-var candidateLine = regexp.MustCompile(`(?m)^  (g\d+\.f\d+) \((text|attribute \w+)\) samples: (.*)$`)
+var candidateLine = regexp.MustCompile(`(?m)^  (g\d+\.f\d+) \((text|number|attribute \w+, url)\) samples: (.*)$`)
 
 func (l *keywordLLM) Complete(_ context.Context, _, user string, _ json.RawMessage) (string, error) {
 	l.calls++
 	wanted := []struct{ name, kind, sample, fieldType string }{
-		{"nombre", "text", "Teclado", "text"}, {"precio", "text", "45.999", "number"}, {"disponibilidad", "text", "En stock", "text"},
+		{"nombre", "text", "Teclado", "text"}, {"precio", "number", "45.999", "number"}, {"disponibilidad", "text", "En stock", "text"},
 	}
 	var fields []string
 	group := ""

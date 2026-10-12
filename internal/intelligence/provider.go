@@ -57,15 +57,16 @@ Rules:
 - Choose exactly one GROUP: the repeated items that represent the records the user wants.
 - For each piece of data requested, choose one field candidate from THAT group, judging by its samples.
 - Never choose two candidates for the same data. Do not add data the user did not ask for.
-- "type" is "number" for prices and quantities, "url" for links and images, otherwise "text".
+- "type" is the kind shown next to the candidate you chose: "text", "number" or "url". Prices are "number" candidates.
 - "required" is true for data every record must have.
 - "next" is the id of the control that leads to the next page of results, or "none".
 - Reply with JSON only.`
 
 // DiscoverRecipe pide al modelo que relacione la instrucción con los candidatos.
 func (p *Provider) DiscoverRecipe(ctx context.Context, snapshot domain.PageSnapshot, instruction string) (domain.Recipe, error) {
-	user := fmt.Sprintf("USER REQUEST: %s\n\nName each field in snake_case, in the language of the request.\n\n%s",
-		instruction, describe(snapshot))
+	user := fmt.Sprintf("%s\nUSER REQUEST: %s\n\nReturn one field per piece of data named in the request, and no others. "+
+		"Name each field with the user's own word for it, in snake_case; do not translate it.",
+		describe(snapshot), instruction)
 	chosen, err := p.ask(ctx, user, schemaFor(snapshot, nil))
 	if err != nil {
 		return domain.Recipe{}, err
@@ -117,9 +118,9 @@ func describe(snapshot domain.PageSnapshot) string {
 	for _, g := range snapshot.Groups {
 		fmt.Fprintf(&b, "\nGROUP %s: %d repeated items\n", g.ID, g.Count)
 		for _, f := range g.Fields {
-			kind := "text"
+			kind := candidateType(f)
 			if f.Attribute != "" {
-				kind = "attribute " + f.Attribute
+				kind = "attribute " + f.Attribute + ", " + kind
 			}
 			quoted := make([]string, len(f.Samples))
 			for i, s := range f.Samples {
@@ -219,9 +220,15 @@ func buildRecipe(snapshot domain.PageSnapshot, chosen selection, keep []domain.F
 			if !ok {
 				return domain.Recipe{}, fmt.Errorf("el modelo devolvió un campo no pedido %q", f.Name)
 			}
+			// Al reparar el tipo es fijo, así que el candidato debe encajar con
+			// él: sin esta comprobación un enlace "/producto/1" pasaría por el
+			// número 1 y la reparación se daría por buena con datos erróneos.
+			if got := candidateType(candidate); got != old.Type {
+				return domain.Recipe{}, fmt.Errorf("el modelo asignó a %q (%s) un candidato de tipo %s", old.Name, old.Type, got)
+			}
 			field.Name, field.Type, field.Required = old.Name, old.Type, old.Required
 		} else {
-			field.Type = fieldType(f.Type, candidate)
+			field.Type = candidateType(candidate)
 		}
 		if field.Name == "" || used[field.Name] {
 			if len(keep) > 0 {
@@ -256,25 +263,23 @@ func buildRecipe(snapshot domain.PageSnapshot, chosen selection, keep []domain.F
 	return recipe, nil
 }
 
-// fieldType corrige el tipo propuesto con lo que muestran los datos: un
-// atributo de enlace es una URL y solo es número lo que se puede leer como tal.
-func fieldType(proposed string, candidate domain.CandidateField) string {
+// candidateType deduce el tipo de un candidato a partir de sus datos, sin
+// fiarse del modelo: un atributo de enlace es una URL y solo es número lo
+// que tiene aspecto de número en todas sus muestras.
+func candidateType(candidate domain.CandidateField) string {
 	switch candidate.Attribute {
 	case "href", "src":
 		return domain.FieldURL
 	}
-	if proposed == domain.FieldNumber {
-		for _, sample := range candidate.Samples {
-			if _, ok := domain.ParseNumber(sample); !ok {
-				return domain.FieldText
-			}
+	if len(candidate.Samples) == 0 {
+		return domain.FieldText
+	}
+	for _, sample := range candidate.Samples {
+		if !domain.LooksNumeric(sample) {
+			return domain.FieldText
 		}
-		return domain.FieldNumber
 	}
-	if proposed == domain.FieldURL {
-		return domain.FieldText // texto visible, no un enlace
-	}
-	return domain.FieldText
+	return domain.FieldNumber
 }
 
 var (

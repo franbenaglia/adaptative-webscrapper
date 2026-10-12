@@ -60,7 +60,8 @@ func TestRealModelDiscoversProductCards(t *testing.T) {
 	if len(result.Records) != 6 || result.PagesVisited != 2 {
 		t.Errorf("registros=%d páginas=%d", len(result.Records), result.PagesVisited)
 	}
-	if result.Recipe.ItemLocator != "article.product" || len(result.Recipe.Fields) != 3 {
+	// Un modelo pequeño añade a veces una columna no pedida (el enlace); se tolera.
+	if result.Recipe.ItemLocator != "article.product" || len(result.Recipe.Fields) < 3 || len(result.Recipe.Fields) > 4 {
 		t.Errorf("receta inesperada: %d campos sobre %q", len(result.Recipe.Fields), result.Recipe.ItemLocator)
 	}
 	values := map[any]bool{}
@@ -84,7 +85,7 @@ func TestRealModelDiscoversTableRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("receta: %+v", *result.Recipe)
-	if len(result.Records) != 5 || len(result.Recipe.Fields) != 2 {
+	if len(result.Records) != 5 || len(result.Recipe.Fields) < 2 || len(result.Recipe.Fields) > 3 {
 		t.Fatalf("registros=%d campos=%d", len(result.Records), len(result.Recipe.Fields))
 	}
 	values := map[any]bool{}
@@ -116,5 +117,31 @@ func TestRealModelRepairsRecipeAfterRedesign(t *testing.T) {
 	last := result.Records[3]
 	if last["nombre"] != "Auriculares" || last["precio"] != 30250.50 || last["disponibilidad"] != "En stock" || last["enlace"] == nil {
 		t.Errorf("último registro = %v", last)
+	}
+}
+
+// Variante con solo tres campos: con ella llama3.2:3b llegó a proponer el
+// enlace como precio. La reparación debe acertar o fallar, nunca dar por
+// buenos datos equivocados.
+func TestRealModelRepairNeverAcceptsWrongData(t *testing.T) {
+	svc := realModelService(t)
+	recipe, err := cli.LoadRecipe("../../examples/recipes/productos-demo.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe.StartURL = demoServer(t) + "/productos-v2.html"
+	recipe.Fields = recipe.Fields[:3]
+	start := time.Now()
+	result, err := svc.Run(context.Background(), domain.ScrapeRequest{Recipe: &recipe, Headless: true}, logEvents(t, start))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("origen: %s, avisos: %v", result.RecipeOrigin, result.Warnings)
+	if result.RecipeOrigin != domain.RecipeRepaired {
+		t.Skipf("el modelo no logró reparar la receta (resultado seguro, sin datos): %v", result.Warnings)
+	}
+	first := result.Records[0]
+	if first["nombre"] != "Teclado mecánico" || first["precio"] != 45999.90 || first["disponibilidad"] != "En stock" {
+		t.Errorf("la reparación se aceptó con datos erróneos: %v", first)
 	}
 }

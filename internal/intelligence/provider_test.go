@@ -59,7 +59,7 @@ func TestDiscoverBuildsRecipeFromCandidateIDs(t *testing.T) {
 	want := []domain.FieldDefinition{
 		{Name: "nombre", Type: domain.FieldText, Locator: "h2.name", Required: true},
 		{Name: "precio", Type: domain.FieldNumber, Locator: "span.price", Required: true},
-		// "number" no encaja con las muestras y un href siempre es URL: se corrigen.
+		// El tipo sale de los datos del candidato, no de lo que diga el modelo.
 		{Name: "disponibilidad", Type: domain.FieldText, Locator: "span.stock"},
 		{Name: "enlace", Type: domain.FieldURL, Locator: "h2.name > a", Attribute: "href"},
 	}
@@ -76,7 +76,7 @@ func TestDiscoverBuildsRecipeFromCandidateIDs(t *testing.T) {
 	}
 
 	// El prompt lleva la instrucción y los candidatos, pero ningún selector.
-	for _, wanted := range []string{"nombre, precio y disponibilidad", "GROUP g1: 6 repeated items", `g1.f3 (text) samples: "$ 45.999,90"`, "g1.f2 (attribute href)", `n1: "Siguiente"`} {
+	for _, wanted := range []string{"nombre, precio y disponibilidad", "GROUP g1: 6 repeated items", `g1.f3 (number) samples: "$ 45.999,90"`, "g1.f2 (attribute href, url)", `g1.f4 (text) samples: "En stock"`, `n1: "Siguiente"`} {
 		if !strings.Contains(llm.user, wanted) {
 			t.Errorf("el prompt no contiene %q:\n%s", wanted, llm.user)
 		}
@@ -173,7 +173,11 @@ func TestRepairKeepsFieldNamesTypesAndRequired(t *testing.T) {
 	for name, reply := range map[string]string{
 		"falta un campo":  `{"group": "g1", "next": "none", "fields": [{"name": "nombre", "candidate": "g1.f1", "type": "text", "required": true}]}`,
 		"campo no pedido": `{"group": "g1", "next": "none", "fields": [{"name": "nombre", "candidate": "g1.f1", "type": "text", "required": true}, {"name": "extra", "candidate": "g1.f3", "type": "text", "required": true}]}`,
-		"campo repetido":  `{"group": "g1", "next": "none", "fields": [{"name": "nombre", "candidate": "g1.f1", "type": "text", "required": true}, {"name": "nombre", "candidate": "g1.f3", "type": "text", "required": true}]}`,
+		"campo repetido":  `{"group": "g1", "next": "none", "fields": [{"name": "nombre", "candidate": "g1.f1", "type": "text", "required": true}, {"name": "nombre", "candidate": "g1.f4", "type": "text", "required": true}]}`,
+		// Caso real con llama3.2:3b: el enlace "/producto/1" se leería como el precio 1.
+		"enlace como precio": `{"group": "g1", "next": "none", "fields": [{"name": "nombre", "candidate": "g1.f1", "type": "text", "required": true}, {"name": "precio", "candidate": "g1.f2", "type": "number", "required": true}]}`,
+		"texto como precio":  `{"group": "g1", "next": "none", "fields": [{"name": "nombre", "candidate": "g1.f1", "type": "text", "required": true}, {"name": "precio", "candidate": "g1.f4", "type": "number", "required": true}]}`,
+		"precio como nombre": `{"group": "g1", "next": "none", "fields": [{"name": "nombre", "candidate": "g1.f3", "type": "text", "required": true}, {"name": "precio", "candidate": "g1.f3", "type": "number", "required": true}]}`,
 	} {
 		if _, err := NewProvider(&scriptedLLM{reply: reply}).RepairRecipe(context.Background(), previous, snapshot, failure); err == nil {
 			t.Errorf("%s: debería rechazarse", name)

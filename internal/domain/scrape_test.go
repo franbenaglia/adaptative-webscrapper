@@ -109,3 +109,14 @@ func TestAssessExtraction(t *testing.T) {
 		t.Errorf("campo requerido roto = %v", failure)
 	}
 }
+
+func TestLooksNumeric(t *testing.T) {
+	for in, want := range map[string]bool{
+		"$ 45.999,90": true, "1,234.50 USD": true, "12 kg": true, "30250.50": true, "-3": true,
+		"/producto/1": false, "En stock": false, "Precio desde 99": false, "": false, "Modelo X200": false,
+	} {
+		if got := LooksNumeric(in); got != want {
+			t.Errorf("LooksNumeric(%q) = %v", in, got)
+		}
+	}
+}
