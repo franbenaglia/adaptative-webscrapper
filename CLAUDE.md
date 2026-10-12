@@ -35,4 +35,11 @@ El objetivo es que cualquier agente pueda retomar el trabajo solo con el reposit
 
 ## Comandos
 
-Aún no hay código. Cuando exista el `Makefile`, documenta aquí los comandos de compilación, pruebas y lint.
+- `make check` — `go vet`, pruebas rápidas y comprobación de formato. Ejecútalo antes de cada commit.
+- `make test-browser` — pruebas de integración con Chromium real (build tag `browser`).
+- `make build` — genera `bin/adaptive-scraper` y `bin/demosite`.
+- `make demo-site` y, en otra terminal, `make demo` — ejecución completa contra el sitio local.
+- `make install-browsers` — instala el driver de Playwright y Chromium (una vez por versión).
+- `make fmt` — aplica `gofmt`.
+
+El módulo Go se llama `adaptive-scraper`; Go está en `~/.local/bin/go`.

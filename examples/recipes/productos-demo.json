@@ -1,0 +1,12 @@
+{
+  "name": "Productos de demostración",
+  "start_url": "http://127.0.0.1:8090/productos.html",
+  "item_locator": "article.product",
+  "fields": [
+    {"name": "nombre", "type": "text", "locator": ".name", "required": true},
+    {"name": "precio", "type": "number", "locator": ".price", "required": true},
+    {"name": "disponibilidad", "type": "text", "locator": ".stock", "required": true},
+    {"name": "enlace", "type": "url", "locator": ".name a", "attribute": "href"}
+  ],
+  "pagination": {"type": "next_button", "next_locator": "button.next"}
+}
