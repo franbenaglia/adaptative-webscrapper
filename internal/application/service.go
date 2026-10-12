@@ -14,21 +14,16 @@ import (
 // Service implementa ScrapingService sobre un BrowserLauncher.
 type Service struct {
 	launcher          BrowserLauncher
-	progress          ProgressSink
 	navigationTimeout time.Duration
 	actionTimeout     time.Duration
 }
 
 var _ ScrapingService = (*Service)(nil)
 
-// NewService crea el servicio. progress puede ser nil.
-func NewService(launcher BrowserLauncher, progress ProgressSink) *Service {
-	if progress == nil {
-		progress = ProgressFunc(func(Event) {})
-	}
+// NewService crea el motor de extracción.
+func NewService(launcher BrowserLauncher) *Service {
 	return &Service{
 		launcher:          launcher,
-		progress:          progress,
 		navigationTimeout: 30 * time.Second,
 		actionTimeout:     10 * time.Second,
 	}
@@ -37,7 +32,10 @@ func NewService(launcher BrowserLauncher, progress ProgressSink) *Service {
 // Run ejecuta la receta de forma determinista hasta agotar páginas, registros
 // o la paginación. Si falla a mitad de camino devuelve lo extraído hasta ese
 // momento junto con el error.
-func (s *Service) Run(ctx context.Context, request domain.ScrapeRequest) (result domain.ScrapeResult, err error) {
+func (s *Service) Run(ctx context.Context, request domain.ScrapeRequest, sink ProgressSink) (result domain.ScrapeResult, err error) {
+	if sink == nil {
+		sink = ProgressFunc(func(Event) {})
+	}
 	request, err = request.Normalize()
 	if err != nil {
 		return result, err
@@ -77,7 +75,7 @@ func (s *Service) Run(ctx context.Context, request domain.ScrapeRequest) (result
 			return result, err
 		}
 		result.PagesVisited++
-		s.progress.Emit(Event{Type: EventPageOpened, Page: result.PagesVisited, URL: pageURL, Records: len(result.Records)})
+		sink.Emit(Event{Type: domain.EventPageOpened, Page: result.PagesVisited, URL: pageURL, Records: len(result.Records)})
 
 		raws, err := session.Extract(ctx, recipe)
 		if err != nil {
@@ -94,6 +92,7 @@ func (s *Service) Run(ctx context.Context, request domain.ScrapeRequest) (result
 			result.Warnings = append(result.Warnings, fmt.Sprintf("página %d: ningún elemento coincide con %q", result.PagesVisited, recipe.ItemLocator))
 		}
 
+		added := len(result.Records)
 		for _, raw := range raws {
 			if len(result.Records) >= request.MaxRecords {
 				break
@@ -109,7 +108,8 @@ func (s *Service) Run(ctx context.Context, request domain.ScrapeRequest) (result
 			seen[key] = true
 			result.Records = append(result.Records, record)
 		}
-		s.progress.Emit(Event{Type: EventRecordsExtracted, Page: result.PagesVisited, URL: pageURL, Records: len(result.Records)})
+		sink.Emit(Event{Type: domain.EventRecordsExtracted, Page: result.PagesVisited, URL: pageURL,
+			Records: len(result.Records), NewRecords: result.Records[added:]})
 
 		if len(result.Records) >= request.MaxRecords || result.PagesVisited >= request.MaxPages || !recipe.HasPagination() {
 			break

@@ -71,9 +71,10 @@ func threePages() *fakeBrowser {
 func TestRunWalksAllPages(t *testing.T) {
 	browser := threePages()
 	var events []Event
-	svc := NewService(browser, ProgressFunc(func(e Event) { events = append(events, e) }))
+	svc := NewService(browser)
+	sink := ProgressFunc(func(e Event) { events = append(events, e) })
 
-	result, err := svc.Run(context.Background(), domain.ScrapeRequest{Recipe: recipe(), Headless: true})
+	result, err := svc.Run(context.Background(), domain.ScrapeRequest{Recipe: recipe(), Headless: true}, sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,18 +90,18 @@ func TestRunWalksAllPages(t *testing.T) {
 	if browser.opened != 1 || browser.closed != 1 || !browser.options.Headless {
 		t.Errorf("sesión mal gestionada: %+v", browser)
 	}
-	if len(events) != 6 || events[0].Type != EventPageOpened || events[5].Records != 5 {
+	if len(events) != 6 || events[0].Type != domain.EventPageOpened || events[5].Records != 5 || len(events[3].NewRecords) != 2 {
 		t.Errorf("eventos = %+v", events)
 	}
 }
 
 func TestRunRespectsLimits(t *testing.T) {
-	result, err := NewService(threePages(), nil).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe(), MaxPages: 2})
+	result, err := NewService(threePages()).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe(), MaxPages: 2}, nil)
 	if err != nil || result.PagesVisited != 2 || len(result.Records) != 4 {
 		t.Fatalf("max-pages: páginas=%d registros=%d err=%v", result.PagesVisited, len(result.Records), err)
 	}
 
-	result, err = NewService(threePages(), nil).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe(), MaxRecords: 3})
+	result, err = NewService(threePages()).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe(), MaxRecords: 3}, nil)
 	if err != nil || result.PagesVisited != 2 || len(result.Records) != 3 {
 		t.Fatalf("max-records: páginas=%d registros=%d err=%v", result.PagesVisited, len(result.Records), err)
 	}
@@ -109,7 +110,7 @@ func TestRunRespectsLimits(t *testing.T) {
 func TestRunWithoutPaginationReadsOnePage(t *testing.T) {
 	r := recipe()
 	r.Pagination = domain.PaginationRule{}
-	result, err := NewService(threePages(), nil).Run(context.Background(), domain.ScrapeRequest{Recipe: r})
+	result, err := NewService(threePages()).Run(context.Background(), domain.ScrapeRequest{Recipe: r}, nil)
 	if err != nil || result.PagesVisited != 1 {
 		t.Fatalf("páginas=%d err=%v", result.PagesVisited, err)
 	}
@@ -119,7 +120,7 @@ func TestRunStopsWhenPaginationRepeatsContent(t *testing.T) {
 	same := []domain.RawRecord{{"name": "A", "price": "1"}}
 	browser := &fakeBrowser{pages: []fakePage{{"https://shop.example/p1", same}, {"https://shop.example/p1", same}, {"https://shop.example/p1", same}}}
 
-	result, err := NewService(browser, nil).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe()})
+	result, err := NewService(browser).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe()}, nil)
 	if err != nil || result.PagesVisited != 1 || len(result.Records) != 1 || len(result.Warnings) != 1 {
 		t.Fatalf("resultado = %+v err=%v", result, err)
 	}
@@ -129,7 +130,7 @@ func TestRunStopsWhenLeavingAllowedHosts(t *testing.T) {
 	browser := threePages()
 	browser.pages[1].url = "https://evil.example/p2"
 
-	result, err := NewService(browser, nil).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe()})
+	result, err := NewService(browser).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe()}, nil)
 	if err == nil || !strings.Contains(err.Error(), "hosts permitidos") {
 		t.Fatalf("se esperaba error de host, se obtuvo %v", err)
 	}
@@ -148,7 +149,7 @@ func TestRunClosesSessionOnFailureAndKeepsPartialResult(t *testing.T) {
 		}
 	}
 
-	result, err := NewService(browser, nil).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe()})
+	result, err := NewService(browser).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe()}, nil)
 	if !errors.Is(err, boom) || len(result.Records) != 2 || browser.closed != 1 {
 		t.Fatalf("err=%v registros=%d cierres=%d", err, len(result.Records), browser.closed)
 	}
@@ -159,7 +160,7 @@ func TestRunStopsOnCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	browser.onExtract = cancel
 
-	result, err := NewService(browser, nil).Run(ctx, domain.ScrapeRequest{Recipe: recipe()})
+	result, err := NewService(browser).Run(ctx, domain.ScrapeRequest{Recipe: recipe()}, nil)
 	if !errors.Is(err, context.Canceled) || result.PagesVisited != 1 || browser.closed != 1 {
 		t.Fatalf("err=%v páginas=%d cierres=%d", err, result.PagesVisited, browser.closed)
 	}
@@ -167,7 +168,7 @@ func TestRunStopsOnCancellation(t *testing.T) {
 
 func TestRunRejectsInvalidRequestWithoutOpeningBrowser(t *testing.T) {
 	browser := threePages()
-	_, err := NewService(browser, nil).Run(context.Background(), domain.ScrapeRequest{})
+	_, err := NewService(browser).Run(context.Background(), domain.ScrapeRequest{}, nil)
 	if !errors.Is(err, domain.ErrInvalidRequest) || browser.opened != 0 {
 		t.Fatalf("err=%v aperturas=%d", err, browser.opened)
 	}

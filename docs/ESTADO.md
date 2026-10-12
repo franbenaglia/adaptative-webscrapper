@@ -10,7 +10,7 @@ persistencia, servidor HTTP, interfaz web ni IA.
 
 ## Fase actual
 
-**Fase 2 — Persistencia y servidor**, sin empezar.
+**Fase 2 — Persistencia y servidor**, en curso.
 
 ## Hecho
 
@@ -26,7 +26,9 @@ persistencia, servidor HTTP, interfaz web ni IA.
 
 ## En curso
 
-Nada.
+- Fase 2, en tres commits: (a) estados de trabajo + SQLite y migraciones; (b) `JobService`, cola y CLI
+  sobre la base de datos; (c) API HTTP con SSE y `cmd/server`. Mira `git log` para saber cuáles están hechos
+  y `make check` para ver si lo que hay sin commit compila.
 
 ## Siguiente paso
 

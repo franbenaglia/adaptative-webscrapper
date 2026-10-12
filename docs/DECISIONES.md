@@ -68,12 +68,17 @@ Formato: `D-NNN — título`, fecha, estado (propuesta / aceptada / sustituida),
   protección SSRF llega en la Fase 5: **hoy no se bloquean redes privadas**; la única barrera es que la
   navegación no puede salir de los hosts permitidos por la receta. La configuración se limita a `PLAYWRIGHT_HEADLESS`.
 
+### D-009 — SQLite con `modernc.org/sqlite` (sin CGO)
+
+- Fecha: 2026-10-12. Estado: aceptada (confirmada por el usuario). Sustituye a la propuesta P-2.
+- Decisión: driver en Go puro, una sola conexión abierta por proceso y modo WAL.
+- Consecuencias: binarios estáticos y Dockerfile sin toolchain de C. Las migraciones viven en `migrations/`
+  como paquete Go con `embed`, para que el binario las lleve dentro.
+
 ## Propuestas pendientes de confirmar (aún no son decisiones)
 
 Surgen de la evaluación de factibilidad del 2026-10-12. Conviértelas en entradas `D-NNN` al adoptarlas.
 
-- **P-2 — Driver SQLite sin CGO** (`modernc.org/sqlite`) para simplificar compilación cruzada y la imagen
-  Docker. Alternativa: `mattn/go-sqlite3` (requiere CGO; gcc está disponible).
 - **P-3 — El modelo elige entre candidatos, no inventa selectores.** El snapshot numera los candidatos de
   contenedores repetidos y de campos, calculados de forma determinista; el modelo devuelve identificadores
   de candidato y nombres de campo. Reduce mucho las alucinaciones de un modelo pequeño y simplifica la validación.

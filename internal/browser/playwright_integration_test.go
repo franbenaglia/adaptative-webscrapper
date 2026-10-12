@@ -30,7 +30,7 @@ func demoSetup(t *testing.T) (*application.Service, domain.Recipe, string) {
 
 	launcher := NewLauncher()
 	t.Cleanup(func() { _ = launcher.Close() })
-	return application.NewService(launcher, nil), recipe, server.URL + "/productos.html"
+	return application.NewService(launcher), recipe, server.URL + "/productos.html"
 }
 
 func TestDemoSiteTwoPages(t *testing.T) {
@@ -38,7 +38,7 @@ func TestDemoSiteTwoPages(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	result, err := svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true})
+	result, err := svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +62,11 @@ func TestDemoSiteLimits(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	result, err := svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true, MaxPages: 1})
+	result, err := svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true, MaxPages: 1}, nil)
 	if err != nil || result.PagesVisited != 1 || len(result.Records) != 3 {
 		t.Fatalf("max-pages: páginas=%d registros=%d err=%v", result.PagesVisited, len(result.Records), err)
 	}
-	result, err = svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true, MaxRecords: 4})
+	result, err = svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true, MaxRecords: 4}, nil)
 	if err != nil || result.PagesVisited != 2 || len(result.Records) != 4 {
 		t.Fatalf("max-records: páginas=%d registros=%d err=%v", result.PagesVisited, len(result.Records), err)
 	}
@@ -77,7 +77,7 @@ func TestCancellationClosesBrowser(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true}); err == nil {
+	if _, err := svc.Run(ctx, domain.ScrapeRequest{URL: start, Recipe: &recipe, Headless: true}, nil); err == nil {
 		t.Fatal("se esperaba error por cancelación")
 	}
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"adaptive-scraper/internal/application"
 	"adaptive-scraper/internal/domain"
+	"adaptive-scraper/internal/storage/sqlite"
 )
 
 const recipeJSON = `{
@@ -25,21 +27,59 @@ const recipeJSON = `{
   "pagination": {"type": "next_button", "next_locator": ".next"}
 }`
 
-// fakeService comprueba que la CLI solo depende de application.ScrapingService,
-// el mismo contrato que usará la API HTTP.
-type fakeService struct {
+// fakeEngine sustituye al motor real. La CLI llega a él a través de
+// application.JobService, el mismo camino que usa la API HTTP.
+type fakeEngine struct {
 	requests []domain.ScrapeRequest
+	records  []domain.Record
 	result   domain.ScrapeResult
 	err      error
 }
 
-var _ application.ScrapingService = (*fakeService)(nil)
-
-func (f *fakeService) Run(_ context.Context, request domain.ScrapeRequest) (domain.ScrapeResult, error) {
+func (f *fakeEngine) Run(_ context.Context, request domain.ScrapeRequest, sink application.ProgressSink) (domain.ScrapeResult, error) {
 	f.requests = append(f.requests, request)
-	result := f.result
-	result.Fields = request.Recipe.Fields
-	return result, f.err
+	if len(f.records) > 0 {
+		sink.Emit(application.Event{Type: domain.EventPageOpened, Page: 1, URL: request.URL})
+		sink.Emit(application.Event{Type: domain.EventRecordsExtracted, Page: 1, URL: request.URL, Records: len(f.records), NewRecords: f.records})
+	}
+	return f.result, f.err
+}
+
+// harness ejecuta comandos contra una base SQLite temporal que persiste
+// entre invocaciones, como ocurre con el binario real.
+type harness struct {
+	t      *testing.T
+	engine *fakeEngine
+	dbPath string
+	opened int
+}
+
+func newHarness(t *testing.T, engine *fakeEngine) *harness {
+	return &harness{t: t, engine: engine, dbPath: filepath.Join(t.TempDir(), "cli.db")}
+}
+
+func (h *harness) run(args ...string) (stdout, stderr string, err error) {
+	var out, errOut bytes.Buffer
+	root := NewRootCommand(Deps{
+		Version:         "test",
+		DefaultHeadless: true,
+		Open: func(ctx context.Context) (Services, func(), error) {
+			h.opened++
+			store, err := sqlite.Open(ctx, h.dbPath)
+			if err != nil {
+				return Services{}, nil, err
+			}
+			return Services{
+				Jobs:    application.NewJobService(h.engine, store.Jobs(), store.Recipes(), application.JobOptions{}),
+				Recipes: application.NewRecipeService(store.Recipes()),
+			}, func() { _ = store.Close() }, nil
+		},
+	})
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs(args)
+	err = root.ExecuteContext(context.Background())
+	return out.String(), errOut.String(), err
 }
 
 func writeRecipe(t *testing.T, content string) string {
@@ -51,48 +91,55 @@ func writeRecipe(t *testing.T, content string) string {
 	return path
 }
 
-func execute(svc application.ScrapingService, args ...string) (stdout, stderr string, err error) {
-	var out, errOut bytes.Buffer
-	root := NewRootCommand(Deps{Service: svc, Version: "test", DefaultHeadless: true})
-	root.SetOut(&out)
-	root.SetErr(&errOut)
-	root.SetArgs(args)
-	err = root.ExecuteContext(context.Background())
-	return out.String(), errOut.String(), err
-}
+func TestScrapeRunsThroughSharedJobService(t *testing.T) {
+	engine := &fakeEngine{
+		records: []domain.Record{{"name": "A", "price": 1.5}},
+		result:  domain.ScrapeResult{PagesVisited: 2, Warnings: []string{"algo raro"}},
+	}
+	h := newHarness(t, engine)
 
-func TestScrapeDelegatesToSharedService(t *testing.T) {
-	svc := &fakeService{result: domain.ScrapeResult{
-		Records:      []domain.Record{{"name": "A", "price": 1.5}},
-		PagesVisited: 2,
-		Warnings:     []string{"algo raro"},
-	}}
-
-	stdout, stderr, err := execute(svc, "scrape", "--recipe", writeRecipe(t, recipeJSON),
+	stdout, stderr, err := h.run("scrape", "--recipe", writeRecipe(t, recipeJSON),
 		"--url", "https://shop.example/other", "--max-pages", "2", "--max-records", "7", "--headless=false")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(svc.requests) != 1 {
-		t.Fatalf("el servicio se invocó %d veces", len(svc.requests))
+	if len(engine.requests) != 1 {
+		t.Fatalf("el motor se invocó %d veces", len(engine.requests))
 	}
-	req := svc.requests[0]
+	req := engine.requests[0]
 	if req.URL != "https://shop.example/other" || req.MaxPages != 2 || req.MaxRecords != 7 || req.Headless || req.Recipe.Name != "demo" {
 		t.Errorf("solicitud = %+v", req)
 	}
 	if !strings.Contains(stdout, `{"name": "A", "price": 1.5}`) {
 		t.Errorf("stdout debe contener los datos en JSON: %q", stdout)
 	}
-	if !strings.Contains(stderr, "aviso: algo raro") || !strings.Contains(stderr, "1 registros en 2 páginas") {
-		t.Errorf("stderr debe contener avisos y resumen: %q", stderr)
+	for _, want := range []string{"página 1: https://shop.example/other", "aviso: algo raro", "1 registros en 2 páginas (completed)"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr no contiene %q: %q", want, stderr)
+		}
+	}
+
+	// La ejecución queda en el historial que también consulta la API.
+	list, _, err := h.run("jobs", "list", "--json")
+	var jobs []domain.Job
+	if err != nil || json.Unmarshal([]byte(list), &jobs) != nil || len(jobs) != 1 ||
+		jobs[0].Status != domain.JobCompleted || jobs[0].RecordCount != 1 {
+		t.Fatalf("jobs list = %s (%v)", list, err)
+	}
+	show, _, err := h.run("jobs", "show", jobs[0].ID)
+	if err != nil || !strings.Contains(show, `"job.completed"`) || !strings.Contains(show, `"records.extracted"`) {
+		t.Errorf("jobs show = %s (%v)", show, err)
+	}
+	if text, _, _ := h.run("jobs", "list"); !strings.Contains(text, "completed") || !strings.Contains(text, "ESTADO") {
+		t.Errorf("tabla de trabajos = %q", text)
 	}
 }
 
 func TestScrapeWritesCSVFileFromExtension(t *testing.T) {
-	svc := &fakeService{result: domain.ScrapeResult{Records: []domain.Record{{"name": "A", "price": 1.5}}}}
+	h := newHarness(t, &fakeEngine{records: []domain.Record{{"name": "A", "price": 1.5}}})
 	output := filepath.Join(t.TempDir(), "out.csv")
 
-	stdout, _, err := execute(svc, "scrape", "--recipe", writeRecipe(t, recipeJSON), "--output", output)
+	stdout, _, err := h.run("scrape", "--recipe", writeRecipe(t, recipeJSON), "--output", output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,33 +151,90 @@ func TestScrapeWritesCSVFileFromExtension(t *testing.T) {
 
 func TestScrapeExportsPartialResultOnLateFailure(t *testing.T) {
 	boom := errors.New("boom")
-	svc := &fakeService{err: boom, result: domain.ScrapeResult{Records: []domain.Record{{"name": "A", "price": 1.0}}}}
+	h := newHarness(t, &fakeEngine{err: boom, records: []domain.Record{{"name": "A", "price": 1.0}}})
 
-	stdout, _, err := execute(svc, "scrape", "--recipe", writeRecipe(t, recipeJSON), "--format", "csv")
-	if !errors.Is(err, boom) || !strings.Contains(stdout, "A,1") {
-		t.Errorf("err = %v stdout = %q", err, stdout)
+	stdout, stderr, err := h.run("scrape", "--recipe", writeRecipe(t, recipeJSON), "--format", "csv")
+	if !errors.Is(err, boom) || !strings.Contains(stdout, "A,1") || !strings.Contains(stderr, "(failed)") {
+		t.Errorf("err = %v stdout = %q stderr = %q", err, stdout, stderr)
 	}
 }
 
-func TestScrapeRejectsBadInputBeforeCallingService(t *testing.T) {
-	svc := &fakeService{}
+func TestScrapeExitCodeFollowsJobOutcome(t *testing.T) {
+	cases := map[int]error{
+		ExitBlocked:   fmt.Errorf("captcha: %w", domain.ErrBlocked),
+		ExitCancelled: fmt.Errorf("interrumpido: %w", context.Canceled),
+		ExitError:     errors.New("boom"),
+	}
+	for want, engineErr := range cases {
+		h := newHarness(t, &fakeEngine{err: engineErr})
+		if _, _, err := h.run("scrape", "--recipe", writeRecipe(t, recipeJSON)); ExitCode(err) != want {
+			t.Errorf("motor devuelve %v: código %d; se esperaba %d", engineErr, ExitCode(err), want)
+		}
+	}
+}
+
+func TestScrapeRejectsBadInputBeforeRunning(t *testing.T) {
+	engine := &fakeEngine{}
+	h := newHarness(t, engine)
+	valid := writeRecipe(t, recipeJSON)
 	cases := map[string][]string{
 		"sin receta":          {"scrape"},
+		"receta e id":         {"scrape", "--recipe", valid, "--recipe-id", "x"},
 		"archivo inexistente": {"scrape", "--recipe", "/no/existe.json"},
 		"campo desconocido":   {"scrape", "--recipe", writeRecipe(t, `{"name":"x","code":"alert(1)"}`)},
 		"receta inválida":     {"scrape", "--recipe", writeRecipe(t, `{"name":"x"}`)},
-		"formato inválido":    {"scrape", "--recipe", writeRecipe(t, recipeJSON), "--format", "xml"},
+		"formato inválido":    {"scrape", "--recipe", valid, "--format", "xml"},
 	}
 	for name, args := range cases {
-		if _, _, err := execute(svc, args...); err == nil {
+		if _, _, err := h.run(args...); err == nil {
 			t.Errorf("%s: se esperaba error", name)
 		}
 	}
-	if len(svc.requests) != 0 {
-		t.Errorf("el servicio no debe invocarse con entrada inválida: %d llamadas", len(svc.requests))
+	if h.opened != 0 {
+		t.Errorf("la entrada inválida no debe abrir la base de datos: %d aperturas", h.opened)
 	}
-	if _, _, err := execute(svc, "scrape", "--recipe", writeRecipe(t, `{"name":"x"}`)); ExitCode(err) != ExitInvalidRecipe {
+	// Estas llegan al servicio compartido, que es quien las rechaza.
+	if _, _, err := h.run("scrape", "--recipe", valid, "--url", "https://evil.example/"); !errors.Is(err, domain.ErrInvalidRequest) {
+		t.Errorf("host no permitido = %v", err)
+	}
+	if _, _, err := h.run("scrape", "--recipe-id", "nope"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("receta inexistente = %v", err)
+	}
+	if len(engine.requests) != 0 {
+		t.Errorf("el motor no debe invocarse con entrada inválida: %d llamadas", len(engine.requests))
+	}
+	if _, _, err := h.run("scrape", "--recipe", writeRecipe(t, `{"name":"x"}`)); ExitCode(err) != ExitInvalidRecipe {
 		t.Errorf("código de salida = %d", ExitCode(err))
+	}
+}
+
+func TestRecipesImportListShowRun(t *testing.T) {
+	engine := &fakeEngine{records: []domain.Record{{"name": "A", "price": 2.0}}}
+	h := newHarness(t, engine)
+
+	out, _, err := h.run("recipes", "import", writeRecipe(t, recipeJSON))
+	id := strings.TrimSpace(out)
+	if err != nil || id == "" {
+		t.Fatalf("import = %q, %v", out, err)
+	}
+	if list, _, _ := h.run("recipes", "list"); !strings.Contains(list, id) || !strings.Contains(list, "demo") {
+		t.Errorf("list = %q", list)
+	}
+	show, _, err := h.run("recipes", "show", id)
+	var recipe domain.Recipe
+	if err != nil || json.Unmarshal([]byte(show), &recipe) != nil || recipe.ID != id || recipe.Version != 1 {
+		t.Errorf("show = %q, %v", show, err)
+	}
+
+	stdout, _, err := h.run("recipes", "run", id, "--format", "csv", "--max-pages", "1")
+	if err != nil || stdout != "name,price\nA,2\n" {
+		t.Fatalf("run = %q, %v", stdout, err)
+	}
+	if len(engine.requests) != 1 || engine.requests[0].MaxPages != 1 || engine.requests[0].URL != "https://shop.example/products" {
+		t.Errorf("solicitud = %+v", engine.requests)
+	}
+	if _, _, err := h.run("recipes", "show", "nope"); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("show inexistente = %v", err)
 	}
 }
 
@@ -149,8 +253,9 @@ func TestExitCode(t *testing.T) {
 	}
 }
 
-func TestVersion(t *testing.T) {
-	if stdout, _, err := execute(&fakeService{}, "version"); err != nil || stdout != "test\n" {
-		t.Errorf("stdout = %q err = %v", stdout, err)
+func TestVersionDoesNotOpenServices(t *testing.T) {
+	h := newHarness(t, &fakeEngine{})
+	if stdout, _, err := h.run("version"); err != nil || stdout != "test\n" || h.opened != 0 {
+		t.Errorf("stdout = %q err = %v aperturas = %d", stdout, err, h.opened)
 	}
 }

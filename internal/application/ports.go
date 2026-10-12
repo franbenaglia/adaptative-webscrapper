@@ -9,9 +9,10 @@ import (
 	"adaptive-scraper/internal/domain"
 )
 
-// ScrapingService es el contrato que usan la CLI y la API.
+// ScrapingService es el motor de extracción: ejecuta una receta de principio
+// a fin. sink puede ser nil.
 type ScrapingService interface {
-	Run(ctx context.Context, request domain.ScrapeRequest) (domain.ScrapeResult, error)
+	Run(ctx context.Context, request domain.ScrapeRequest, sink ProgressSink) (domain.ScrapeResult, error)
 }
 
 // BrowserOptions configura una sesión de navegador.
@@ -38,21 +39,18 @@ type BrowserSession interface {
 	Close() error
 }
 
-// Tipos de evento de progreso. Coinciden con los nombres que usará SSE.
-const (
-	EventPageOpened       = "page.opened"
-	EventRecordsExtracted = "records.extracted"
-)
-
-// Event es una notificación de progreso de una ejecución.
+// Event es una notificación de progreso del motor. Type es uno de
+// domain.EventPageOpened o domain.EventRecordsExtracted.
 type Event struct {
 	Type    string
 	Page    int
 	URL     string
 	Records int // total acumulado
+	// NewRecords son los registros añadidos en esta página (solo en records.extracted).
+	NewRecords []domain.Record
 }
 
-// ProgressSink recibe eventos de progreso. Las implementaciones no deben bloquear.
+// ProgressSink recibe eventos de progreso de forma síncrona, en orden.
 type ProgressSink interface {
 	Emit(event Event)
 }
@@ -61,3 +59,30 @@ type ProgressSink interface {
 type ProgressFunc func(Event)
 
 func (f ProgressFunc) Emit(event Event) { f(event) }
+
+// JobFilter acota un listado de trabajos. Limit <= 0 significa sin límite.
+type JobFilter struct {
+	Status domain.JobStatus
+	Limit  int
+}
+
+// RecipeRepository guarda recetas y sus versiones.
+type RecipeRepository interface {
+	Create(ctx context.Context, recipe domain.Recipe, now time.Time) error
+	Update(ctx context.Context, recipe domain.Recipe, now time.Time) error
+	Get(ctx context.Context, id string) (domain.Recipe, error)
+	List(ctx context.Context) ([]domain.Recipe, error)
+	Delete(ctx context.Context, id string) error
+}
+
+// JobRepository guarda trabajos junto con sus eventos y registros.
+type JobRepository interface {
+	Create(ctx context.Context, job domain.Job) error
+	Update(ctx context.Context, job domain.Job) error
+	Get(ctx context.Context, id string) (domain.Job, error)
+	List(ctx context.Context, filter JobFilter) ([]domain.Job, error)
+	AppendRecords(ctx context.Context, jobID string, start int, records []domain.Record) error
+	Records(ctx context.Context, jobID string, offset, limit int) ([]domain.Record, error)
+	AppendEvent(ctx context.Context, event domain.JobEvent) (domain.JobEvent, error)
+	Events(ctx context.Context, jobID string, after int64) ([]domain.JobEvent, error)
+}
