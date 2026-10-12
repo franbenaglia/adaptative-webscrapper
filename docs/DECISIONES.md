@@ -134,15 +134,60 @@ Formato: `D-NNN — título`, fecha, estado (propuesta / aceptada / sustituida),
 - Sin pruebas automáticas de frontend por ahora: `npm run check` (tipos + compilación) y verificación manual
   en navegador. Si la interfaz crece, añadir Vitest.
 
+### D-016 — El modelo elige entre candidatos numerados; nunca escribe selectores
+
+- Fecha: 2026-10-12. Estado: aceptada. Adopta las propuestas P-3 y P-4.
+- Contexto: el hardware solo permite modelos pequeños en CPU, poco fiables generando CSS.
+- Decisión: `internal/browser/snapshot.go` resume la página con un script fijo en grupos de elementos
+  repetidos (`g1`), campos dentro de cada elemento (`g1.f2`, con muestras) y controles de página siguiente
+  (`n1`). El prompt lista identificadores y muestras, sin selectores ni HTML. El modelo devuelve
+  `{group, fields:[{name, candidate, type, required}], next}` y `internal/intelligence` lo traduce a una
+  receta. El esquema JSON que se pasa a Ollama (`format`) enumera los identificadores válidos, así que la
+  generación no puede salirse de ellos; aun así se decodifica de forma estricta y se comprueba cada id.
+- Consecuencias: los selectores son siempre CSS válido generado por nosotros. El tipo propuesto se corrige
+  con las muestras (un `href` es `url`; solo es `number` lo que se puede leer como número). Si el dato que
+  quiere el usuario no está entre los candidatos (por ejemplo dentro de un iframe o en un atributo que el
+  script no mira), el modelo no puede encontrarlo: hay que ampliar el script.
+- `intelligence.LLM` (una función `Complete` con esquema) es el único punto que conoce a Ollama; otro
+  proveedor, local o remoto, solo implementa esa interfaz.
+
+### D-017 — Cuándo interviene el modelo
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: con receta, la ejecución es determinista y el modelo no se consulta. Solo se consulta (a) sin
+  receta, para descubrirla, y (b) si en la **primera página** la receta no encuentra elementos o un campo
+  requerido falta en más de la mitad (`domain.AssessExtraction`), para repararla, con un máximo de
+  `AI_MAX_REPAIRS` intentos (2 por defecto).
+- La reparación conserva identidad, nombres, tipos y obligatoriedad de los campos, y solo se acepta si la
+  receta nueva extrae bien en esa misma página. Si el trabajo termina `completed` y partía de una receta
+  guardada, la reparada se guarda sola como versión siguiente. Una receta descubierta no se guarda sola:
+  queda en el trabajo y el usuario decide (botón en la web, `--save-recipe` en la CLI).
+- Consecuencias: una rotura que aparezca en páginas posteriores no se repara (solo genera avisos). Una
+  receta recibida que no se puede reparar termina `completed` sin registros y con avisos; una descubierta
+  que no extrae nada termina `failed`.
+
+### D-018 — Detección de bloqueos
+
+- Fecha: 2026-10-12. Estado: aceptada.
+- Decisión: `Navigate` convierte 401, 403 y 429 en `domain.ErrBlocked`. Además, antes de descubrir y
+  cuando una receta no encuentra nada, un script fijo busca CAPTCHA, textos de verificación humana o un
+  campo de contraseña, y solo los considera bloqueo si la página tiene poco texto (menos de 1500
+  caracteres). Ante un bloqueo el trabajo termina `blocked` sin consultar al modelo.
+- Consecuencias: es una heurística (riesgo R-3): una página grande con un CAPTCHA incrustado no se detecta
+  y una página pequeña legítima con un formulario de acceso sí.
+
+### D-019 — Configuración de la IA y elección de modelo
+
+- Fecha: 2026-10-12. Estado: aceptada (el usuario pidió Ollama sin Docker, modelo pequeño y configurable).
+- Decisión: `AI_ENABLED` (false por defecto), `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `AI_MAX_REPAIRS`,
+  `AI_TIMEOUT`. Cualquier usuario elige el modelo poniendo `OLLAMA_MODEL` en `.env` y descargándolo con
+  `make ollama-pull`. `GET /api/v1/ai`, `adaptive-scraper ai status` y el formulario web muestran el modelo
+  activo y si está instalado. `make test-ai` ejecuta el recorrido real (descubrir tarjetas, descubrir una
+  tabla, reparar tras un rediseño) con el modelo configurado: es la forma de evaluar un modelo antes de adoptarlo.
+- Consecuencias: el modelo es global al proceso, no se elige por trabajo.
+
 ## Propuestas pendientes de confirmar (aún no son decisiones)
 
-Surgen de la evaluación de factibilidad del 2026-10-12. Conviértelas en entradas `D-NNN` al adoptarlas.
-
-- **P-3 — El modelo elige entre candidatos, no inventa selectores.** El snapshot numera los candidatos de
-  contenedores repetidos y de campos, calculados de forma determinista; el modelo devuelve identificadores
-  de candidato y nombres de campo. Reduce mucho las alucinaciones de un modelo pequeño y simplifica la validación.
-- **P-4 — Salida estructurada de Ollama** (parámetro `format` con JSON Schema) además de la decodificación
-  estricta y la validación semántica propias.
 - **P-5 — SSRF aplicado en el navegador**, interceptando todas las peticiones (`Route`) y validando host e IP
   de cada una, no solo con una resolución DNS previa (que es vulnerable a DNS rebinding y no cubre
   subrecursos ni redirecciones).

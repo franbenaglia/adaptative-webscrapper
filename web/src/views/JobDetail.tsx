@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, errorMessage, EVENT_TYPES, isTerminal, type Job, type JobEvent, type RecordsPage } from "../api";
+import {
+  api,
+  errorMessage,
+  EVENT_TYPES,
+  hasRecipe,
+  isTerminal,
+  type Job,
+  type JobEvent,
+  jobTitle,
+  type RecordsPage,
+} from "../api";
 import { navigate } from "../router";
 import { ErrorNote, formatDate, StatusBadge } from "../ui";
 
@@ -13,6 +23,12 @@ function describe(event: JobEvent): string {
       return `Página ${event.page} abierta: ${event.url}`;
     case "records.extracted":
       return `Página ${event.page}: ${event.records} registros acumulados`;
+    case "recipe.discovered":
+      return `El modelo propuso una receta (${event.message ?? "sin detalle"})`;
+    case "recipe.validated":
+      return `Receta validada: ${event.message ?? ""}`;
+    case "recipe.repairing":
+      return `La receta no funciona; el modelo intenta repararla (${event.message ?? ""})`;
     case "job.completed":
       return `Completado con ${event.records} registros`;
     case "job.failed":
@@ -63,7 +79,7 @@ export function JobDetail({ id }: { id: string }) {
       if (event.type.startsWith("job.") && event.type !== "job.started") {
         source.close();
       }
-      if (event.type !== "page.opened") {
+      if (event.type !== "page.opened" && event.type !== "recipe.repairing") {
         void refresh();
       }
     };
@@ -96,13 +112,14 @@ export function JobDetail({ id }: { id: string }) {
   }
 
   const done = isTerminal(job.status);
-  const fields = page?.fields ?? job.recipe.fields;
+  const fields = page?.fields ?? job.recipe.fields ?? [];
+  const recipeReady = hasRecipe(job);
   const total = page?.total ?? 0;
 
   return (
     <div className="stack">
       <div className="heading">
-        <h1>{job.recipe.name}</h1>
+        <h1>{jobTitle(job)}</h1>
         <StatusBadge status={job.status} />
       </div>
 
@@ -129,6 +146,12 @@ export function JobDetail({ id }: { id: string }) {
           <dt>URL</dt>
           <dd className="break">{job.url}</dd>
         </div>
+        {job.instruction && (
+          <div className="wide">
+            <dt>Instrucción</dt>
+            <dd>{job.instruction}</dd>
+          </div>
+        )}
       </dl>
 
       {job.error && <p className={`note ${job.status === "cancelled" ? "note-info" : "note-error"}`}>{job.error}</p>}
@@ -165,7 +188,12 @@ export function JobDetail({ id }: { id: string }) {
                   max_pages: job.max_pages,
                   max_records: job.max_records,
                   headless: job.headless,
-                  ...(job.recipe_id ? { recipe_id: job.recipe_id } : { recipe: job.recipe }),
+                  // Con receta se repite sin IA; si no llegó a descubrirse, se vuelve a pedir.
+                  ...(job.recipe_id
+                    ? { recipe_id: job.recipe_id }
+                    : recipeReady
+                      ? { recipe: job.recipe }
+                      : { instruction: job.instruction }),
                 });
                 navigate(`#/jobs/${again.id}`);
               })
@@ -174,7 +202,7 @@ export function JobDetail({ id }: { id: string }) {
             Ejecutar de nuevo
           </button>
         )}
-        {!job.recipe_id && !recipeSaved && (
+        {!job.recipe_id && recipeReady && done && !recipeSaved && (
           <button
             type="button"
             disabled={busy}
@@ -265,10 +293,18 @@ export function JobDetail({ id }: { id: string }) {
         )}
       </section>
 
-      <details>
-        <summary>Receta utilizada</summary>
-        <pre className="code">{JSON.stringify(job.recipe, null, 2)}</pre>
-      </details>
+      {recipeReady && (
+        <details>
+          <summary>
+            {job.recipe_origin === "discovered"
+              ? "Receta descubierta por el modelo"
+              : job.recipe_origin === "repaired"
+                ? "Receta reparada por el modelo"
+                : "Receta utilizada"}
+          </summary>
+          <pre className="code">{JSON.stringify(job.recipe, null, 2)}</pre>
+        </details>
+      )}
     </div>
   );
 }

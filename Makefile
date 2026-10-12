@@ -1,4 +1,4 @@
-.PHONY: build test test-browser fmt vet check install-browsers demo-site demo server web-install web-build web-dev web-check
+.PHONY: build test test-browser fmt vet check install-browsers demo-site demo server web-install web-build web-dev web-check test-ai ollama-pull
 
 VERSION ?= dev
 
@@ -15,12 +15,21 @@ test:
 test-browser:
 	go test -tags browser ./internal/browser/...
 
+# Pruebas con un modelo real: requieren `ollama serve` y el modelo descargado.
+# Para evaluar otro modelo: OLLAMA_MODEL=<modelo> make test-ai
+test-ai:
+	go test -tags "browser ollama" -count=1 -v -timeout 30m -run RealModel ./internal/browser/...
+
+# Descarga el modelo configurado en OLLAMA_MODEL (o el modelo por defecto).
+ollama-pull:
+	ollama pull $${OLLAMA_MODEL:-$$(go run ./cmd/scraper ai default-model)}
+
 fmt:
 	gofmt -l -w .
 
 vet:
 	go vet ./...
-	go vet -tags browser ./...
+	go vet -tags "browser ollama" ./...
 
 check: vet test
 	@test -z "$$(gofmt -l .)" || (echo "archivos sin formatear:"; gofmt -l .; exit 1)

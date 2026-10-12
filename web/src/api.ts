@@ -22,10 +22,15 @@ export interface Recipe {
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "blocked" | "cancelled";
 
+export type RecipeOrigin = "provided" | "discovered" | "repaired";
+
 export interface Job {
   id: string;
   recipe_id?: string;
+  instruction?: string;
+  // Vacía (sin nombre ni campos) mientras el modelo no haya descubierto la receta.
   recipe: Recipe;
+  recipe_origin?: RecipeOrigin;
   url: string;
   status: JobStatus;
   max_pages: number;
@@ -62,8 +67,19 @@ export interface RecordsPage {
   limit: number;
 }
 
+export interface AIStatus {
+  enabled: boolean;
+  provider?: string;
+  model?: string;
+  reachable: boolean;
+  model_installed: boolean;
+  installed_models: string[];
+  message?: string;
+}
+
 export interface JobRequest {
   url?: string;
+  instruction?: string;
   recipe_id?: string;
   recipe?: Recipe;
   max_pages?: number;
@@ -75,6 +91,9 @@ export const EVENT_TYPES = [
   "job.started",
   "page.opened",
   "records.extracted",
+  "recipe.discovered",
+  "recipe.validated",
+  "recipe.repairing",
   "job.completed",
   "job.failed",
   "job.blocked",
@@ -124,7 +143,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
+// jobTitle da nombre a un trabajo aunque todavía no tenga receta.
+export function jobTitle(job: Job): string {
+  return job.recipe.name || job.instruction || job.url;
+}
+
+export function hasRecipe(job: Job): boolean {
+  return Boolean(job.recipe.item_locator);
+}
+
 export const api = {
+  aiStatus: () => request<AIStatus>("GET", "/ai"),
   createJob: (job: JobRequest) => request<Job>("POST", "/jobs", job),
   listJobs: () => request<{ jobs: Job[] }>("GET", "/jobs?limit=200").then((r) => r.jobs),
   getJob: (id: string) => request<Job>("GET", `/jobs/${encodeURIComponent(id)}`),

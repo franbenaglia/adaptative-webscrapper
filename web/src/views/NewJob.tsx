@@ -1,16 +1,18 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { api, errorMessage, type JobRequest, type Recipe } from "../api";
+import { type AIStatus, api, errorMessage, type JobRequest, type Recipe } from "../api";
 import { parseRecipe, RECIPE_TEMPLATE } from "../recipe";
 import { navigate } from "../router";
 import { ErrorNote } from "../ui";
 
-type Source = "saved" | "inline";
+type Source = "ai" | "saved" | "inline";
 
 export function NewJob({ recipeId }: { recipeId?: string }) {
   const [recipes, setRecipes] = useState<Recipe[] | null>(null);
   const [source, setSource] = useState<Source>(recipeId ? "saved" : "inline");
   const [selected, setSelected] = useState(recipeId ?? "");
   const [recipeText, setRecipeText] = useState(RECIPE_TEMPLATE);
+  const [instruction, setInstruction] = useState("");
+  const [ai, setAI] = useState<AIStatus | null>(null);
   const [url, setUrl] = useState("");
   const [maxPages, setMaxPages] = useState(5);
   const [maxRecords, setMaxRecords] = useState(100);
@@ -35,16 +37,36 @@ export function NewJob({ recipeId }: { recipeId?: string }) {
     };
   }, [recipeId]);
 
+  useEffect(() => {
+    let active = true;
+    api
+      .aiStatus()
+      .then((status) => active && setAI(status))
+      .catch(() => undefined); // sin estado de IA, esa opción queda desactivada
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const aiReady = Boolean(ai?.enabled && ai.reachable && ai.model_installed);
   const parsed = parseRecipe(recipeText);
   const savedRecipe = recipes?.find((r) => r.id === selected);
   const defaultURL = source === "saved" ? savedRecipe?.start_url : parsed.ok ? parsed.recipe.start_url : undefined;
-  const canSubmit = !submitting && (source === "saved" ? selected !== "" : parsed.ok);
+  const canSubmit =
+    !submitting &&
+    (source === "saved"
+      ? selected !== ""
+      : source === "inline"
+        ? parsed.ok
+        : aiReady && instruction.trim() !== "" && url.trim() !== "");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const request: JobRequest = { max_pages: maxPages, max_records: maxRecords, headless };
     if (url.trim() !== "") request.url = url.trim();
-    if (source === "saved") {
+    if (source === "ai") {
+      request.instruction = instruction.trim();
+    } else if (source === "saved") {
       request.recipe_id = selected;
     } else if (parsed.ok) {
       request.recipe = parsed.recipe;
@@ -67,8 +89,12 @@ export function NewJob({ recipeId }: { recipeId?: string }) {
       <h1>Nueva extracción</h1>
 
       <fieldset>
-        <legend>Receta</legend>
+        <legend>Qué extraer</legend>
         <div className="choices">
+          <label>
+            <input type="radio" name="source" checked={source === "ai"} onChange={() => setSource("ai")} />
+            Describirlo (IA)
+          </label>
           <label>
             <input
               type="radio"
@@ -77,15 +103,42 @@ export function NewJob({ recipeId }: { recipeId?: string }) {
               disabled={!recipes || recipes.length === 0}
               onChange={() => setSource("saved")}
             />
-            Guardada
+            Receta guardada
           </label>
           <label>
             <input type="radio" name="source" checked={source === "inline"} onChange={() => setSource("inline")} />
-            JSON
+            Receta en JSON
           </label>
         </div>
 
-        {source === "saved" ? (
+        {source === "ai" && (
+          <div className="field">
+            <label className="field">
+              <span>Instrucción</span>
+              <textarea
+                rows={3}
+                maxLength={2000}
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                placeholder="Por ejemplo: nombre, precio y disponibilidad de cada producto"
+              />
+            </label>
+            {ai === null ? (
+              <small className="hint">Comprobando el modelo…</small>
+            ) : aiReady ? (
+              <small className="hint">
+                El modelo {ai.model} propondrá una receta para esta página. Sin GPU puede tardar un minuto o más.
+                Después podrás guardarla y reutilizarla sin IA.
+              </small>
+            ) : (
+              <small className="hint hint-error">
+                {ai.message ?? "La IA no está disponible."} Mientras tanto puedes usar una receta.
+              </small>
+            )}
+          </div>
+        )}
+
+        {source === "ai" ? null : source === "saved" ? (
           <label className="field">
             <span>Receta guardada</span>
             <select value={selected} onChange={(e) => setSelected(e.target.value)}>
@@ -122,12 +175,17 @@ export function NewJob({ recipeId }: { recipeId?: string }) {
           <span>URL inicial</span>
           <input
             type="url"
+            required={source === "ai"}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder={defaultURL ?? "https://…"}
+            placeholder={(source !== "ai" && defaultURL) || "https://…"}
           />
         </label>
-        <small className="hint">Opcional. Si la dejas vacía se usa la URL de la receta.</small>
+        <small className="hint">
+          {source === "ai"
+            ? "La página con el listado que quieres extraer."
+            : "Opcional. Si la dejas vacía se usa la URL de la receta."}
+        </small>
       </div>
 
       <div className="row">

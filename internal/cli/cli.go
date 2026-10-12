@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"adaptive-scraper/internal/application"
+	"adaptive-scraper/internal/config"
 	"adaptive-scraper/internal/domain"
 	"adaptive-scraper/internal/export"
 )
@@ -124,6 +125,13 @@ func newScrapeCommand(deps Deps) *cobra.Command {
 func newAICommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{Use: "ai", Short: "Consulta el proveedor de IA"}
 	cmd.AddCommand(&cobra.Command{
+		Use:   "default-model",
+		Short: "Muestra el modelo que se usa si no se configura OLLAMA_MODEL",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintln(cmd.OutOrStdout(), config.DefaultOllamaModel)
+		},
+	}, &cobra.Command{
 		Use:   "status",
 		Short: "Muestra el modelo configurado y si está disponible",
 		Args:  cobra.NoArgs,

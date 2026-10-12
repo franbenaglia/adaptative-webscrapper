@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, isTerminal, type Job } from "../api";
+import { api, errorMessage, isTerminal, type Job, jobTitle } from "../api";
 import { ErrorNote, formatDate, StatusBadge } from "../ui";
 
 const REFRESH_MS = 3000;
@@ -58,7 +58,7 @@ export function Jobs() {
               {jobs.map((job) => (
                 <tr key={job.id}>
                   <td>
-                    <a href={`#/jobs/${job.id}`}>{job.recipe.name}</a>
+                    <a href={`#/jobs/${job.id}`}>{jobTitle(job)}</a>
                     <div className="muted small break">{job.url}</div>
                   </td>
                   <td>
