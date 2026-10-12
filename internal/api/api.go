@@ -10,9 +10,11 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"adaptive-scraper/internal/application"
@@ -36,6 +38,11 @@ type Server struct {
 	DefaultHeadless bool
 	// AIStatus informa del proveedor de IA; nil equivale a IA desactivada.
 	AIStatus func(ctx context.Context) application.AIStatus
+	// AllowedHosts son nombres de host adicionales aceptados en la cabecera
+	// Host; loopback y localhost se aceptan siempre.
+	AllowedHosts []string
+	// DiagnosticsDir es donde se guardan capturas y trazas; vacío las desactiva.
+	DiagnosticsDir string
 	// WebDir es el directorio con la interfaz web ya compilada; vacío la desactiva.
 	WebDir string
 }
@@ -54,6 +61,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs/{id}/records", s.jobRecords)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/events", s.jobEvents)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/export", s.exportJob)
+	mux.HandleFunc("GET /api/v1/jobs/{id}/diagnostics", s.listDiagnostics)
+	mux.HandleFunc("GET /api/v1/jobs/{id}/diagnostics/{name}", s.getDiagnostic)
 
 	mux.HandleFunc("GET /api/v1/recipes", s.listRecipes)
 	mux.HandleFunc("POST /api/v1/recipes", s.createRecipe)
@@ -67,7 +76,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /", http.FileServer(http.Dir(s.WebDir)))
 	}
 
-	return s.recoverPanics(s.logRequests(requireJSONBody(mux)))
+	return s.recoverPanics(s.logRequests(s.checkHost(requireJSONBody(mux))))
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -165,6 +174,31 @@ func requireJSONBody(next http.Handler) http.Handler {
 				writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "se requiere Content-Type: application/json"})
 				return
 			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkHost rechaza peticiones cuya cabecera Host no sea este equipo. Protege
+// de DNS rebinding: una web externa que apunte su dominio a 127.0.0.1 llegaría
+// a la API, pero con su propio nombre en Host.
+func (s *Server) checkHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(r.Host); err == nil {
+			host = h
+		}
+		host = strings.ToLower(strings.Trim(host, "[]"))
+		allowed := host == "localhost"
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			allowed = true
+		}
+		for _, extra := range s.AllowedHosts {
+			allowed = allowed || host == extra
+		}
+		if !allowed {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cabecera Host no permitida; añádela a APP_ALLOWED_HOSTS si es legítima"})
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

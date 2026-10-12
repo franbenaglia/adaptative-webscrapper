@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -32,8 +33,11 @@ type JobOptions struct {
 	Timeout time.Duration
 	// AIEnabled permite crear trabajos sin receta.
 	AIEnabled bool
-	Now       func() time.Time
-	NewID     func() string
+	// DiagnosticsDir, si no está vacío, guarda captura y traza de los trabajos
+	// que fallan en una subcarpeta por trabajo.
+	DiagnosticsDir string
+	Now            func() time.Time
+	NewID          func() string
 }
 
 // JobService es el caso de uso compartido por la CLI y la API: crea trabajos,
@@ -46,6 +50,7 @@ type JobService struct {
 	logger  *slog.Logger
 	timeout time.Duration
 	ai      bool
+	diagDir string
 	now     func() time.Time
 	newID   func() string
 
@@ -66,7 +71,7 @@ func NewJobService(engine ScrapingService, jobs JobRepository, recipes RecipeRep
 	}
 	return &JobService{
 		engine: engine, jobs: jobs, recipes: recipes, hub: NewEventHub(),
-		logger: options.Logger, timeout: options.Timeout, ai: options.AIEnabled, now: options.Now, newID: options.NewID,
+		logger: options.Logger, timeout: options.Timeout, ai: options.AIEnabled, diagDir: options.DiagnosticsDir, now: options.Now, newID: options.NewID,
 		cancels: map[string]context.CancelFunc{},
 	}
 }
@@ -176,7 +181,11 @@ func (s *JobService) Execute(ctx context.Context, id string, onEvent func(domain
 		emit(domain.JobEvent{Type: e.Type, Page: e.Page, URL: e.URL, Records: job.RecordCount, Message: e.Message})
 	})
 
-	result, runErr := s.run(runCtx, job.Request(), sink)
+	request := job.Request()
+	if s.diagDir != "" {
+		request.DiagnosticsDir = filepath.Join(s.diagDir, job.ID)
+	}
+	result, runErr := s.run(runCtx, request, sink)
 	if persistErr != nil {
 		runErr = fmt.Errorf("guardar el progreso: %w", persistErr)
 	}

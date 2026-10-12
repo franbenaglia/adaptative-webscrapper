@@ -56,6 +56,7 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	queue.Start(ctx)
+	go pruneDiagnostics(ctx, cfg, logger)
 
 	webDir := cfg.WebDir
 	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err != nil {
@@ -64,7 +65,7 @@ func run(logger *slog.Logger) error {
 	}
 	handler := (&api.Server{
 		Jobs: app.Jobs, Recipes: app.Recipes, Queue: queue, Logger: logger, DefaultHeadless: cfg.Headless, WebDir: webDir,
-		AIStatus: app.AIStatus,
+		AIStatus: app.AIStatus, AllowedHosts: cfg.AllowedHosts, DiagnosticsDir: cfg.DiagnosticsDir(),
 	}).Handler()
 	// Sin WriteTimeout: las respuestas SSE duran lo que dura el trabajo.
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
@@ -72,7 +73,8 @@ func run(logger *slog.Logger) error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()
 	logger.Info("servidor iniciado", "addr", cfg.HTTPAddr, "database", cfg.DatabasePath,
-		"max_concurrent_jobs", cfg.MaxConcurrentJobs, "requeued", len(pending), "ai_enabled", cfg.AIEnabled, "model", cfg.OllamaModel)
+		"max_concurrent_jobs", cfg.MaxConcurrentJobs, "requeued", len(pending), "ai_enabled", cfg.AIEnabled, "model", cfg.OllamaModel,
+		"allow_private_networks", cfg.AllowPrivateNetworks, "diagnostics", cfg.Diagnostics)
 
 	select {
 	case err := <-serveErr:
@@ -89,4 +91,26 @@ func run(logger *slog.Logger) error {
 	_ = server.Close()
 	queue.Wait()
 	return nil
+}
+
+// pruneDiagnostics aplica la retención de capturas y trazas al arrancar y cada hora.
+func pruneDiagnostics(ctx context.Context, cfg config.Config, logger *slog.Logger) {
+	dir := cfg.DiagnosticsDir()
+	if dir == "" {
+		return
+	}
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if removed, err := application.PruneDiagnostics(dir, cfg.DiagnosticsRetention, time.Now()); err != nil {
+			logger.Warn("no se pudieron borrar diagnósticos antiguos", "error", err)
+		} else if removed > 0 {
+			logger.Info("diagnósticos antiguos borrados", "count", removed)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

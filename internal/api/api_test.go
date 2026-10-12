@@ -532,3 +532,80 @@ func TestAIStatusWhenDisabled(t *testing.T) {
 		t.Errorf("respuesta = %d %s", resp.StatusCode, body)
 	}
 }
+
+// Una web externa que apunte su dominio a 127.0.0.1 llega con su nombre en Host.
+func TestRejectsForeignHostHeader(t *testing.T) {
+	handler := (&api.Server{Logger: slog.New(slog.DiscardHandler), AllowedHosts: []string{"scraper.lan"}}).Handler()
+	cases := map[string]int{
+		"127.0.0.1:8080": 200, "localhost:8080": 200, "LOCALHOST": 200, "[::1]:8080": 200, "scraper.lan:8080": 200,
+		"evil.example": 403, "evil.example:8080": 403, "127.0.0.1.evil.example": 403, "192.168.1.5:8080": 403, "": 403,
+	}
+	for host, want := range cases {
+		req := httptest.NewRequest("GET", "/healthz", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("Host %q = %d; se esperaba %d", host, rec.Code, want)
+		}
+	}
+}
+
+func TestDiagnosticsEndpoints(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "diag.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	eng := &engine{requests: make(chan domain.ScrapeRequest, 4)}
+	jobs := application.NewJobService(eng, store.Jobs(), store.Recipes(), application.JobOptions{})
+	var recipe domain.Recipe
+	_ = json.Unmarshal([]byte(recipeJSON), &recipe)
+	job, err := jobs.Create(ctx, application.JobRequest{Recipe: &recipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagDir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(diagDir, job.ID), 0o700)
+	_ = os.WriteFile(filepath.Join(diagDir, job.ID, "screenshot.png"), []byte("PNG-DATA"), 0o600)
+	_ = os.WriteFile(filepath.Join(diagDir, job.ID, "secreto.txt"), []byte("no"), 0o600)
+	_ = os.WriteFile(filepath.Join(diagDir, "fuera.txt"), []byte("no"), 0o600)
+
+	get := func(server *httptest.Server, path string) (int, string) {
+		resp, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+	on := httptest.NewServer((&api.Server{Jobs: jobs, Logger: slog.New(slog.DiscardHandler), DiagnosticsDir: diagDir}).Handler())
+	defer on.Close()
+	base := "/api/v1/jobs/" + job.ID + "/diagnostics"
+
+	if code, body := get(on, base); code != 200 || !strings.Contains(body, `"files":["screenshot.png"]`) {
+		t.Errorf("listado = %d %s", code, body)
+	}
+	if code, body := get(on, base+"/screenshot.png"); code != 200 || body != "PNG-DATA" {
+		t.Errorf("captura = %d %q", code, body)
+	}
+	for _, name := range []string{"trace.zip", "secreto.txt", "..%2Ffuera.txt", "%2e%2e%2f%2e%2e%2ffuera.txt"} {
+		if code, body := get(on, base+"/"+name); code != 404 {
+			t.Errorf("%s = %d %q; se esperaba 404", name, code, body)
+		}
+	}
+	if code, _ := get(on, "/api/v1/jobs/nope/diagnostics"); code != 404 {
+		t.Errorf("trabajo inexistente = %d", code)
+	}
+
+	off := httptest.NewServer((&api.Server{Jobs: jobs, Logger: slog.New(slog.DiscardHandler)}).Handler())
+	defer off.Close()
+	if code, body := get(off, base); code != 200 || !strings.Contains(body, `"files":[]`) {
+		t.Errorf("listado con diagnósticos desactivados = %d %s", code, body)
+	}
+	if code, _ := get(off, base+"/screenshot.png"); code != 404 {
+		t.Errorf("captura con diagnósticos desactivados = %d", code)
+	}
+}

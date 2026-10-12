@@ -45,9 +45,10 @@ demo-site:
 server:
 	go run ./cmd/server
 
-# Requiere `make demo-site` en otra terminal.
+# Requiere `make demo-site` en otra terminal. El sitio de demostración vive en
+# 127.0.0.1, que la política de red bloquea salvo permiso explícito.
 demo: build
-	bin/adaptive-scraper scrape --recipe examples/recipes/productos-demo.json --output bin/productos.csv
+	APP_ALLOW_PRIVATE_NETWORKS=true bin/adaptive-scraper scrape --recipe examples/recipes/productos-demo.json --output bin/productos.csv
 
 # Interfaz web (requiere Node.js 20.19 o posterior).
 web-install:

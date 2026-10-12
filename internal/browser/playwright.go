@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 
 	"adaptive-scraper/internal/application"
 	"adaptive-scraper/internal/domain"
+	"adaptive-scraper/internal/netguard"
 )
 
 // Tiempo que se espera a que un clic en "siguiente" cambie la URL antes de
@@ -32,28 +36,46 @@ const extractScript = `(items, fields) => items.map((item) => {
   return out;
 })`
 
+// Options ajusta el adaptador.
+type Options struct {
+	// Policy decide a qué direcciones puede llegar el navegador.
+	Policy netguard.Policy
+	// MaxBytesPerConnection limita lo que el navegador recibe por conexión; 0 es sin límite.
+	MaxBytesPerConnection int64
+}
+
 // Launcher implementa application.BrowserLauncher con Chromium. El driver de
-// Playwright se inicia en el primer Open y se comparte entre sesiones.
+// Playwright y el proxy de filtrado se inician en el primer Open y se
+// comparten entre sesiones.
 type Launcher struct {
-	mu sync.Mutex
-	pw *playwright.Playwright
+	options Options
+	mu      sync.Mutex
+	pw      *playwright.Playwright
+	proxy   *netguard.Proxy
 }
 
 var _ application.BrowserLauncher = (*Launcher)(nil)
 
-func NewLauncher() *Launcher { return &Launcher{} }
+func NewLauncher(options Options) *Launcher { return &Launcher{options: options} }
 
-func (l *Launcher) driver() (*playwright.Playwright, error) {
+func (l *Launcher) start() (*playwright.Playwright, *netguard.Proxy, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.proxy == nil {
+		proxy, err := netguard.StartProxy(l.options.Policy, l.options.MaxBytesPerConnection)
+		if err != nil {
+			return nil, nil, fmt.Errorf("iniciar el proxy de filtrado: %w", err)
+		}
+		l.proxy = proxy
+	}
 	if l.pw == nil {
 		pw, err := playwright.Run()
 		if err != nil {
-			return nil, fmt.Errorf("iniciar Playwright (¿falta `make install-browsers`?): %w", err)
+			return nil, nil, fmt.Errorf("iniciar Playwright (¿falta `make install-browsers`?): %w", err)
 		}
 		l.pw = pw
 	}
-	return l.pw, nil
+	return l.pw, l.proxy, nil
 }
 
 // Open lanza un navegador con un contexto aislado. Al cancelarse ctx el
@@ -62,22 +84,34 @@ func (l *Launcher) Open(ctx context.Context, options application.BrowserOptions)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	pw, err := l.driver()
+	pw, proxy, err := l.start()
 	if err != nil {
 		return nil, err
 	}
-	br, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{Headless: playwright.Bool(options.Headless)})
+	br, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(options.Headless),
+		// Todo el tráfico pasa por el proxy, que aplica la política de red.
+		// "<-loopback>" anula la excepción que Chromium hace con localhost.
+		Proxy: &playwright.Proxy{Server: proxy.URL(), Bypass: playwright.String("<-loopback>")},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("lanzar Chromium: %w", err)
 	}
-	s := &session{browser: br, done: make(chan struct{})}
-	bctx, err := br.NewContext()
+	s := &session{browser: br, policy: l.options.Policy, done: make(chan struct{})}
+	bctx, err := br.NewContext(playwright.BrowserNewContextOptions{AcceptDownloads: playwright.Bool(false)})
 	if err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("crear contexto: %w", err)
 	}
 	bctx.SetDefaultTimeout(ms(options.ActionTimeout))
 	bctx.SetDefaultNavigationTimeout(ms(options.NavigationTimeout))
+	if options.Trace {
+		if err := bctx.Tracing().Start(playwright.TracingStartOptions{Screenshots: playwright.Bool(true), Snapshots: playwright.Bool(true)}); err != nil {
+			_ = s.Close()
+			return nil, fmt.Errorf("iniciar la traza: %w", err)
+		}
+		s.tracing = bctx.Tracing()
+	}
 	if s.page, err = bctx.NewPage(); err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("crear página: %w", err)
@@ -92,33 +126,50 @@ func (l *Launcher) Open(ctx context.Context, options application.BrowserOptions)
 	return s, nil
 }
 
-// Close detiene el driver de Playwright. Las sesiones deben cerrarse antes.
+// Close detiene el driver de Playwright y el proxy. Las sesiones deben cerrarse antes.
 func (l *Launcher) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.pw == nil {
-		return nil
+	var err error
+	if l.pw != nil {
+		err = l.pw.Stop()
+		l.pw = nil
 	}
-	err := l.pw.Stop()
-	l.pw = nil
+	if l.proxy != nil {
+		err = errors.Join(err, l.proxy.Close())
+		l.proxy = nil
+	}
 	return err
 }
 
 type session struct {
 	browser   playwright.Browser
 	page      playwright.Page
+	policy    netguard.Policy
+	tracing   playwright.Tracing // nil si no se pidió traza
 	done      chan struct{}
 	closeOnce sync.Once
 	closeErr  error
 }
 
 func (s *session) Navigate(ctx context.Context, rawURL string) error {
+	// Comprobación previa para dar un error claro; quien hace cumplir la
+	// política en todas las peticiones es el proxy.
+	if err := s.policy.CheckURL(ctx, rawURL); err != nil {
+		return err
+	}
 	response, err := s.page.Goto(rawURL, playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateLoad})
 	if err != nil {
+		if strings.Contains(err.Error(), "ERR_TUNNEL_CONNECTION_FAILED") {
+			return fmt.Errorf("%w (o el destino no respondió): %s", netguard.ErrForbidden, rawURL)
+		}
 		return ctxErr(ctx, err)
 	}
 	if response == nil {
 		return nil
+	}
+	if marker, _ := response.HeaderValue(netguard.BlockedHeader); marker != "" {
+		return fmt.Errorf("%w: la página redirige a %s", netguard.ErrForbidden, response.URL())
 	}
 	switch status := response.Status(); {
 	case status == 401 || status == 403 || status == 429:
@@ -189,6 +240,32 @@ func (s *session) GoToNextPage(ctx context.Context, rule domain.PaginationRule) 
 		return false, ctxErr(ctx, err)
 	}
 	return true, nil
+}
+
+// SaveDiagnostics guarda una captura de la página y, si se pidió al abrir la
+// sesión, la traza de Playwright. Devuelve los archivos escritos.
+func (s *session) SaveDiagnostics(dir string) ([]string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	var files []string
+	var errs []error
+	screenshot := filepath.Join(dir, application.DiagnosticScreenshot)
+	if _, err := s.page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(screenshot), FullPage: playwright.Bool(true)}); err != nil {
+		errs = append(errs, fmt.Errorf("captura: %w", err))
+	} else {
+		files = append(files, screenshot)
+	}
+	if s.tracing != nil {
+		trace := filepath.Join(dir, application.DiagnosticTrace)
+		if err := s.tracing.Stop(trace); err != nil {
+			errs = append(errs, fmt.Errorf("traza: %w", err))
+		} else {
+			files = append(files, trace)
+		}
+		s.tracing = nil
+	}
+	return files, errors.Join(errs...)
 }
 
 func (s *session) Close() error {

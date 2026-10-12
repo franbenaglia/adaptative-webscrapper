@@ -13,7 +13,11 @@ import (
 	"adaptive-scraper/internal/application"
 	"adaptive-scraper/internal/cli"
 	"adaptive-scraper/internal/domain"
+	"adaptive-scraper/internal/netguard"
 )
+
+// localOptions permite loopback: las pruebas usan servidores locales.
+var localOptions = Options{Policy: netguard.Policy{AllowPrivate: true}}
 
 // Ejecuta el servicio real con Chromium contra examples/demo servido en local.
 func demoSetup(t *testing.T) (*application.Service, domain.Recipe, string) {
@@ -28,7 +32,7 @@ func demoSetup(t *testing.T) (*application.Service, domain.Recipe, string) {
 	u, _ := url.Parse(server.URL)
 	recipe.AllowedHosts = []string{u.Hostname()}
 
-	launcher := NewLauncher()
+	launcher := NewLauncher(localOptions)
 	t.Cleanup(func() { _ = launcher.Close() })
 	return application.NewService(launcher, application.ServiceOptions{}), recipe, server.URL + "/productos.html"
 }

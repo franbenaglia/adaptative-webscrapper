@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -246,4 +248,54 @@ func (s *Server) jobEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// diagnosticFiles son los únicos nombres que se sirven: nada de lo que llega
+// en la URL se usa para construir rutas.
+var diagnosticFiles = []string{application.DiagnosticScreenshot, application.DiagnosticTrace}
+
+func (s *Server) jobDiagnosticsDir(w http.ResponseWriter, r *http.Request) (string, bool) {
+	job, err := s.Jobs.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeError(w, r, err)
+		return "", false
+	}
+	if s.DiagnosticsDir == "" {
+		return "", true
+	}
+	return filepath.Join(s.DiagnosticsDir, job.ID), true
+}
+
+func (s *Server) listDiagnostics(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.jobDiagnosticsDir(w, r)
+	if !ok {
+		return
+	}
+	files := []string{}
+	for _, name := range diagnosticFiles {
+		if dir == "" {
+			break
+		}
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
+			files = append(files, name)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": files})
+}
+
+func (s *Server) getDiagnostic(w http.ResponseWriter, r *http.Request) {
+	dir, ok := s.jobDiagnosticsDir(w, r)
+	if !ok {
+		return
+	}
+	for _, name := range diagnosticFiles {
+		if dir != "" && name == r.PathValue("name") {
+			if name == application.DiagnosticTrace {
+				w.Header().Set("Content-Disposition", `attachment; filename="trace.zip"`)
+			}
+			http.ServeFile(w, r, filepath.Join(dir, name))
+			return
+		}
+	}
+	s.writeError(w, r, fmt.Errorf("diagnóstico: %w", domain.ErrNotFound))
 }

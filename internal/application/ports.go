@@ -20,7 +20,15 @@ type BrowserOptions struct {
 	Headless          bool
 	NavigationTimeout time.Duration
 	ActionTimeout     time.Duration
+	// Trace graba una traza de la sesión para SaveDiagnostics.
+	Trace bool
 }
+
+// Nombres de los archivos de diagnóstico de un trabajo.
+const (
+	DiagnosticScreenshot = "screenshot.png"
+	DiagnosticTrace      = "trace.zip"
+)
 
 // BrowserLauncher abre sesiones aisladas, una por trabajo.
 type BrowserLauncher interface {
@@ -41,6 +49,9 @@ type BrowserSession interface {
 	// BlockReason describe por qué la página impide el acceso (login,
 	// CAPTCHA, verificación humana) o devuelve "" si no lo impide.
 	BlockReason(ctx context.Context) (string, error)
+	// SaveDiagnostics guarda en dir una captura y, si hay, la traza; devuelve
+	// los archivos escritos. Debe llamarse antes de Close.
+	SaveDiagnostics(dir string) ([]string, error)
 	Close() error
 }
 

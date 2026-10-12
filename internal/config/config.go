@@ -23,6 +23,12 @@ type Config struct {
 	Headless          bool          // PLAYWRIGHT_HEADLESS
 	WebDir            string        // APP_WEB_DIR
 
+	AllowPrivateNetworks bool          // APP_ALLOW_PRIVATE_NETWORKS
+	MaxResponseBytes     int64         // APP_MAX_RESPONSE_MB (en MB)
+	AllowedHosts         []string      // APP_ALLOWED_HOSTS
+	Diagnostics          bool          // APP_DIAGNOSTICS
+	DiagnosticsRetention time.Duration // APP_DIAGNOSTICS_RETENTION
+
 	AIEnabled     bool          // AI_ENABLED
 	OllamaBaseURL string        // OLLAMA_BASE_URL
 	OllamaModel   string        // OLLAMA_MODEL
@@ -75,6 +81,25 @@ func load(lookupEnv func(string) (string, bool), envFile string) (Config, error)
 	if cfg.Headless, err = strconv.ParseBool(get("PLAYWRIGHT_HEADLESS", "true")); err != nil {
 		return cfg, fmt.Errorf("PLAYWRIGHT_HEADLESS debe ser true o false")
 	}
+	if cfg.AllowPrivateNetworks, err = strconv.ParseBool(get("APP_ALLOW_PRIVATE_NETWORKS", "false")); err != nil {
+		return cfg, fmt.Errorf("APP_ALLOW_PRIVATE_NETWORKS debe ser true o false")
+	}
+	megabytes, err := strconv.ParseInt(get("APP_MAX_RESPONSE_MB", "256"), 10, 64)
+	if err != nil || megabytes < 0 || megabytes > 1<<20 {
+		return cfg, fmt.Errorf("APP_MAX_RESPONSE_MB debe ser un entero mayor o igual que cero")
+	}
+	cfg.MaxResponseBytes = megabytes << 20
+	for _, host := range strings.Split(get("APP_ALLOWED_HOSTS", ""), ",") {
+		if host = strings.ToLower(strings.TrimSpace(host)); host != "" {
+			cfg.AllowedHosts = append(cfg.AllowedHosts, host)
+		}
+	}
+	if cfg.Diagnostics, err = strconv.ParseBool(get("APP_DIAGNOSTICS", "false")); err != nil {
+		return cfg, fmt.Errorf("APP_DIAGNOSTICS debe ser true o false")
+	}
+	if cfg.DiagnosticsRetention, err = time.ParseDuration(get("APP_DIAGNOSTICS_RETENTION", "168h")); err != nil || cfg.DiagnosticsRetention <= 0 {
+		return cfg, fmt.Errorf("APP_DIAGNOSTICS_RETENTION debe ser una duración como 168h")
+	}
 	if cfg.AIEnabled, err = strconv.ParseBool(get("AI_ENABLED", "false")); err != nil {
 		return cfg, fmt.Errorf("AI_ENABLED debe ser true o false")
 	}
@@ -89,6 +114,14 @@ func load(lookupEnv func(string) (string, bool), envFile string) (Config, error)
 		return cfg, fmt.Errorf("OLLAMA_BASE_URL debe ser una URL http o https")
 	}
 	return cfg, nil
+}
+
+// DiagnosticsDir es la carpeta de capturas y trazas, o "" si están desactivadas.
+func (c Config) DiagnosticsDir() string {
+	if !c.Diagnostics {
+		return ""
+	}
+	return filepath.Join(c.DataDir, "diagnostics")
 }
 
 // parseEnvFile admite líneas CLAVE=valor, comentarios con # y comillas opcionales.

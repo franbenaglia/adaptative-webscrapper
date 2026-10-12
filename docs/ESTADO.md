@@ -10,7 +10,7 @@ empaquetado y el endurecimiento.
 
 ## Fase actual
 
-**Fase 5 — Empaquetado y endurecimiento**, sin empezar.
+**Fase 5 — Empaquetado y endurecimiento**, en curso.
 
 ## Hecho
 
@@ -29,7 +29,9 @@ empaquetado y el endurecimiento.
 
 ## En curso
 
-Nada.
+- Fase 5, en commits separados: (a) `internal/netguard` (política de red + proxy de filtrado que usa
+  Chromium) y validación de `Host` en la API; (b) capturas y trazas al fallar, con retención;
+  (c) `Dockerfile` y `compose.yaml`; (d) `docs/ARQUITECTURA.md` y cierre. `git log` dice cuáles están hechos.
 
 ## Siguiente paso
 

@@ -30,6 +30,9 @@ type ScrapeRequest struct {
 	MaxPages    int
 	MaxRecords  int
 	Headless    bool
+	// DiagnosticsDir, si no está vacío, es donde guardar una captura y una
+	// traza cuando la ejecución falla o queda bloqueada.
+	DiagnosticsDir string
 }
 
 // Orígenes de la receta con la que terminó una ejecución.

@@ -51,6 +51,21 @@ export function JobDetail({ id }: { id: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [recipeSaved, setRecipeSaved] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<string[]>([]);
+  const failed = job?.status === "failed" || job?.status === "blocked";
+
+  // La captura y la traza solo existen para trabajos fallidos o bloqueados.
+  useEffect(() => {
+    if (!failed) return;
+    let active = true;
+    api
+      .jobDiagnostics(id)
+      .then((files) => active && setDiagnostics(files))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [id, failed]);
   const offsetRef = useRef(0);
   offsetRef.current = offset;
 
@@ -218,6 +233,27 @@ export function JobDetail({ id }: { id: string }) {
           </button>
         )}
       </div>
+
+      {diagnostics.length > 0 && (
+        <section className="stack">
+          <h2>Diagnóstico</h2>
+          {diagnostics.includes("screenshot.png") && (
+            <a href={api.diagnosticURL(id, "screenshot.png")} target="_blank" rel="noreferrer">
+              <img
+                className="screenshot"
+                src={api.diagnosticURL(id, "screenshot.png")}
+                alt="Captura de la página en el momento del fallo"
+              />
+            </a>
+          )}
+          {diagnostics.includes("trace.zip") && (
+            <p className="muted">
+              <a href={api.diagnosticURL(id, "trace.zip")}>Descargar la traza de Playwright</a> (se abre en
+              trace.playwright.dev).
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="stack">
         <h2>Progreso</h2>

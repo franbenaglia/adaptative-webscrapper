@@ -35,7 +35,7 @@ func realModelService(t *testing.T) *application.Service {
 		t.Fatalf("modelo %s no disponible: %s", model, status.Message)
 	}
 	t.Logf("modelo: %s", model)
-	launcher := NewLauncher()
+	launcher := NewLauncher(localOptions)
 	t.Cleanup(func() { _ = launcher.Close() })
 	return application.NewService(launcher, application.ServiceOptions{Intelligence: intelligence.NewProvider(ollama), MaxRepairs: 2})
 }

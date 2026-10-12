@@ -12,6 +12,7 @@ import (
 	"adaptive-scraper/internal/browser"
 	"adaptive-scraper/internal/config"
 	"adaptive-scraper/internal/intelligence"
+	"adaptive-scraper/internal/netguard"
 	"adaptive-scraper/internal/storage/sqlite"
 )
 
@@ -34,7 +35,10 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 	if err != nil {
 		return nil, err
 	}
-	launcher := browser.NewLauncher()
+	launcher := browser.NewLauncher(browser.Options{
+		Policy:                netguard.Policy{AllowPrivate: cfg.AllowPrivateNetworks},
+		MaxBytesPerConnection: cfg.MaxResponseBytes,
+	})
 
 	engineOptions := application.ServiceOptions{MaxRepairs: cfg.AIMaxRepairs}
 	aiStatus := func(context.Context) application.AIStatus {
@@ -49,7 +53,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, er
 	return &App{
 		Config: cfg,
 		Jobs: application.NewJobService(application.NewService(launcher, engineOptions), store.Jobs(), store.Recipes(),
-			application.JobOptions{Logger: logger, Timeout: cfg.JobTimeout, AIEnabled: cfg.AIEnabled}),
+			application.JobOptions{Logger: logger, Timeout: cfg.JobTimeout, AIEnabled: cfg.AIEnabled, DiagnosticsDir: cfg.DiagnosticsDir()}),
 		Recipes:  application.NewRecipeService(store.Recipes()),
 		AIStatus: aiStatus,
 		store:    store,

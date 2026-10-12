@@ -66,6 +66,7 @@ func (s *Service) Run(ctx context.Context, request domain.ScrapeRequest, sink Pr
 		Headless:          request.Headless,
 		NavigationTimeout: s.navigationTimeout,
 		ActionTimeout:     s.actionTimeout,
+		Trace:             request.DiagnosticsDir != "",
 	})
 	if err != nil {
 		return result, fmt.Errorf("abrir navegador: %w", err)
@@ -73,6 +74,18 @@ func (s *Service) Run(ctx context.Context, request domain.ScrapeRequest, sink Pr
 	defer func() {
 		if cerr := session.Close(); cerr != nil && err == nil {
 			err = fmt.Errorf("cerrar navegador: %w", cerr)
+		}
+	}()
+	// Se ejecuta antes del cierre. Tras una cancelación el navegador ya no
+	// responde, así que no se intenta.
+	defer func() {
+		if err == nil || request.DiagnosticsDir == "" || ctx.Err() != nil {
+			return
+		}
+		if files, derr := session.SaveDiagnostics(request.DiagnosticsDir); len(files) > 0 {
+			result.Warnings = append(result.Warnings, "diagnóstico guardado en "+request.DiagnosticsDir)
+		} else if derr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("no se pudo guardar el diagnóstico: %v", derr))
 		}
 	}()
 

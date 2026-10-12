@@ -29,7 +29,7 @@ func demoServer(t *testing.T) string {
 
 func openPage(t *testing.T, url string) application.BrowserSession {
 	t.Helper()
-	launcher := NewLauncher()
+	launcher := NewLauncher(localOptions)
 	t.Cleanup(func() { _ = launcher.Close() })
 	session, err := launcher.Open(context.Background(), application.BrowserOptions{
 		Headless: true, NavigationTimeout: 30 * time.Second, ActionTimeout: 10 * time.Second,
@@ -140,7 +140,7 @@ func TestNavigateReportsHTTPErrors(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
-	launcher := NewLauncher()
+	launcher := NewLauncher(localOptions)
 	defer launcher.Close()
 	session, err := launcher.Open(context.Background(), application.BrowserOptions{Headless: true, NavigationTimeout: 30 * time.Second, ActionTimeout: 10 * time.Second})
 	if err != nil {
@@ -187,7 +187,7 @@ func (l *keywordLLM) Complete(_ context.Context, _, user string, _ json.RawMessa
 
 func aiService(t *testing.T) (*application.Service, *keywordLLM) {
 	t.Helper()
-	launcher := NewLauncher()
+	launcher := NewLauncher(localOptions)
 	t.Cleanup(func() { _ = launcher.Close() })
 	llm := &keywordLLM{}
 	return application.NewService(launcher, application.ServiceOptions{Intelligence: intelligence.NewProvider(llm), MaxRepairs: 2}), llm

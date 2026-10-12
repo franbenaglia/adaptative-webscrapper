@@ -161,6 +161,10 @@ export const api = {
   jobRecords: (id: string, offset: number, limit: number) =>
     request<RecordsPage>("GET", `/jobs/${encodeURIComponent(id)}/records?offset=${offset}&limit=${limit}`),
   eventsURL: (id: string) => `${BASE}/jobs/${encodeURIComponent(id)}/events`,
+  jobDiagnostics: (id: string) =>
+    request<{ files: string[] }>("GET", `/jobs/${encodeURIComponent(id)}/diagnostics`).then((r) => r.files),
+  diagnosticURL: (id: string, name: string) =>
+    `${BASE}/jobs/${encodeURIComponent(id)}/diagnostics/${encodeURIComponent(name)}`,
   exportURL: (id: string, format: "json" | "csv") => `${BASE}/jobs/${encodeURIComponent(id)}/export?format=${format}`,
 
   listRecipes: () => request<{ recipes: Recipe[] }>("GET", "/recipes").then((r) => r.recipes),

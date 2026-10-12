@@ -27,6 +27,7 @@ type fakeBrowser struct {
 	onExtract   func()
 	snapshot    domain.PageSnapshot
 	blockReason string
+	diagnostics []string
 }
 
 func (f *fakeBrowser) Open(_ context.Context, options BrowserOptions) (BrowserSession, error) {
@@ -55,7 +56,14 @@ func (f *fakeBrowser) GoToNextPage(context.Context, domain.PaginationRule) (bool
 }
 func (f *fakeBrowser) Snapshot(context.Context) (domain.PageSnapshot, error) { return f.snapshot, nil }
 func (f *fakeBrowser) BlockReason(context.Context) (string, error)           { return f.blockReason, nil }
-func (f *fakeBrowser) Close() error                                          { f.closed++; return nil }
+func (f *fakeBrowser) SaveDiagnostics(dir string) ([]string, error) {
+	f.diagnostics = append(f.diagnostics, dir)
+	if f.closed > 0 {
+		return nil, errors.New("la sesión ya estaba cerrada")
+	}
+	return []string{dir + "/screenshot.png"}, nil
+}
+func (f *fakeBrowser) Close() error { f.closed++; return nil }
 
 // fakeAI simula el proveedor de IA y cuenta sus invocaciones.
 type fakeAI struct {
@@ -440,5 +448,52 @@ func TestRunStopsAsBlockedInsteadOfRepairing(t *testing.T) {
 	noAI.blockReason = "la página muestra un CAPTCHA"
 	if _, err := NewService(noAI, ServiceOptions{}).Run(context.Background(), domain.ScrapeRequest{Recipe: brokenRecipe()}, nil); !errors.Is(err, domain.ErrBlocked) {
 		t.Errorf("sin IA: err = %v", err)
+	}
+}
+
+func TestRunSavesDiagnosticsOnlyOnFailure(t *testing.T) {
+	ok := threePages()
+	result, err := NewService(ok, ServiceOptions{}).Run(context.Background(),
+		domain.ScrapeRequest{Recipe: recipe(), DiagnosticsDir: "/diag/j1"}, nil)
+	if err != nil || len(ok.diagnostics) != 0 || !ok.options.Trace {
+		t.Fatalf("éxito: err = %v, diagnósticos = %v, traza = %v", err, ok.diagnostics, ok.options.Trace)
+	}
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "diagnóstico") {
+			t.Errorf("aviso inesperado: %s", w)
+		}
+	}
+
+	failing := threePages()
+	failing.extractErr = errors.New("boom")
+	result, err = NewService(failing, ServiceOptions{}).Run(context.Background(),
+		domain.ScrapeRequest{Recipe: recipe(), DiagnosticsDir: "/diag/j2"}, nil)
+	if err == nil || len(failing.diagnostics) != 1 || failing.diagnostics[0] != "/diag/j2" ||
+		!strings.Contains(strings.Join(result.Warnings, "|"), "diagnóstico guardado en /diag/j2") {
+		t.Fatalf("fallo: err = %v, diagnósticos = %v, avisos = %v", err, failing.diagnostics, result.Warnings)
+	}
+
+	blocked := cardsSite()
+	blocked.blockReason = "la página muestra un CAPTCHA"
+	if _, err := NewService(blocked, ServiceOptions{}).Run(context.Background(),
+		domain.ScrapeRequest{Recipe: brokenRecipe(), DiagnosticsDir: "/diag/j3"}, nil); !errors.Is(err, domain.ErrBlocked) || len(blocked.diagnostics) != 1 {
+		t.Errorf("bloqueo: err = %v, diagnósticos = %v", err, blocked.diagnostics)
+	}
+
+	// Sin directorio no se graba traza ni se guarda nada.
+	off := threePages()
+	off.extractErr = errors.New("boom")
+	_, _ = NewService(off, ServiceOptions{}).Run(context.Background(), domain.ScrapeRequest{Recipe: recipe()}, nil)
+	if len(off.diagnostics) != 0 || off.options.Trace {
+		t.Errorf("desactivado: diagnósticos = %v, traza = %v", off.diagnostics, off.options.Trace)
+	}
+
+	// Tras una cancelación el navegador ya está cerrado: no se intenta.
+	cancelled := threePages()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelled.onExtract = cancel
+	_, _ = NewService(cancelled, ServiceOptions{}).Run(ctx, domain.ScrapeRequest{Recipe: recipe(), DiagnosticsDir: "/diag/j4"}, nil)
+	if len(cancelled.diagnostics) != 0 {
+		t.Errorf("cancelado: diagnósticos = %v", cancelled.diagnostics)
 	}
 }
